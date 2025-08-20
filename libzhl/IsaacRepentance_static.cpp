@@ -525,8 +525,8 @@ bool Room::IsChampionBossSeed() const {
 }
 
 bool ItemConfig::IsValidTrinket(unsigned int TrinketType) {
-	if (TrinketType != 0 && (TrinketType & 0x7fff) < g_Manager->GetItemConfig()->GetTrinkets()->size()) {
-		if (g_Manager->GetItemConfig()->GetTrinket(TrinketType & 0x7fff) != nullptr) {
+	if (TrinketType != 0 && (TrinketType & TRINKET_ID_MASK) < g_Manager->GetItemConfig()->GetTrinkets()->size()) {
+		if (g_Manager->GetItemConfig()->GetTrinket(TrinketType & TRINKET_ID_MASK) != nullptr) {
 			return true;
 		}
 	}
@@ -537,37 +537,6 @@ bool ItemConfig::IsValidTrinket(unsigned int TrinketType) {
 bool Isaac::IsInGame() {
 	return g_Manager->GetState() == 2 && g_Game;
 }
-
-bool Entity_Player::AddSmeltedTrinket(int trinketID, bool firstTime) {
-	bool trinketAdded = false;
-
-	if (ItemConfig::IsValidTrinket(trinketID)) {
-		const int actualTrinketID = trinketID & 0x7fff;
-		if (trinketID != actualTrinketID) {
-			_smeltedTrinkets[actualTrinketID]._goldenTrinketNum++;
-		}
-		else {
-			_smeltedTrinkets[actualTrinketID]._trinketNum++;
-		}
-
-		TriggerTrinketAdded(trinketID, firstTime);
-
-		History_HistoryItem* historyItem = new History_HistoryItem((TrinketType)trinketID, g_Game->_stage, g_Game->_stageType, g_Game->_room->_roomType, 0);
-		GetHistory()->AddHistoryItem(historyItem);
-
-		delete(historyItem);
-
-		InvalidateCoPlayerItems();
-
-		ItemConfig_Item* config = g_Manager->GetItemConfig()->GetTrinket(actualTrinketID);
-		if (config && config->addCostumeOnPickup) {
-			AddCostume(config, false);
-		}
-
-		trinketAdded = true;
-	}
-	return trinketAdded;
-};
 
 void ScoreSheet::AddFinishedStage(int stage, int stageType, unsigned int time) {
 	if ((_runTimeLevel < stage) && g_Game->GetDailyChallenge()._id == 0) {
@@ -628,4 +597,48 @@ void Entity_Bomb::UpdateDirtColor() {
             layer._color._offset[2] = 0.0f;
         }
     }
+}
+
+void Entity_Pickup::InitFlipState(CollectibleType collectType, bool setupCollectibleGraphics) {
+	 
+	if (_variant == PICKUP_COLLECTIBLE && CanReroll() && !_dead) {
+
+		EntitySaveState* emptySaveState = new EntitySaveState();
+
+		_flipSaveState.SetP(emptySaveState);
+		EntitySaveState* flipState = _flipSaveState.saveState;
+
+		flipState->type = _type, flipState->variant = _variant;
+
+		RNG rng = RNG();
+		rng.SetSeed(_initSeed, 39);
+		unsigned int seed = rng.Next();
+
+		flipState->_initSeed = seed;
+
+		int collectibleID = (collectType != COLLECTIBLE_NULL) ? collectType :  g_Game->_itemPool.GetSeededCollectible(flipState->_initSeed, true, g_Game->_room->_descriptor); //to-do: add valid itemconfig check
+
+		flipState->subtype = collectibleID;
+
+		_altPedestalANM2.Reset();
+		if (setupCollectibleGraphics) {
+			
+
+			ANM2 copySprite = ANM2();
+			copySprite.construct_from_copy(&_sprite);
+
+			Isaac::SwapANM2(&_altPedestalANM2, &copySprite);
+
+			Entity_Pickup::SetupCollectibleGraphics(&_altPedestalANM2, 1, (CollectibleType)flipState->subtype, flipState->_initSeed, false);
+
+			_altPedestalANM2.LoadGraphics(true);
+
+			_altPedestalANM2.Play(_sprite.GetAnimationData(0)->GetName().c_str(), true);
+			_altPedestalANM2.Update();
+		}
+	}
+
+	
+
+	return;
 }

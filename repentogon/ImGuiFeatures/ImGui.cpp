@@ -70,6 +70,12 @@ std::list<ImGuiKey>* GetPressedKeys()
 	return keys;
 }
 
+float GetAvailableMenuSpace() {
+	const float helpButtonSize = ImGui::CalcTextSize(LANG.HELP_MENU).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+	const float mergeButtonWidth = ImGui::CalcTextSize(ICON_U8_FA_ELLIPSIS).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+	return ImGui::GetContentRegionAvail().x - helpButtonSize - mergeButtonWidth - ImGui::GetStyle().WindowPadding.x * 2.0f;
+}
+
 void HelpMarker(const char* desc)
 {
 	ImGui::TextDisabled("(?)");
@@ -427,7 +433,7 @@ LRESULT CALLBACK windowProc_hook(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 // Manual handling of Window scaling via CTRL + Scroll, to only scale a window as a whole, and not every element seperately
 void HandleZoomWithMouseWheel() {
 	ImGuiContext& g = *GImGui;
-	if (g.HoveredWindow && g.IO.MouseWheel != 0.0f && !g.HoveredWindow->Collapsed)
+	if (g.HoveredWindow && (g.IO.MouseClicked[2] || g.IO.MouseWheel != 0.0f) && !g.HoveredWindow->Collapsed)
 	{
 		// change scale operation to be executed on window root
 		ImGuiWindow* window = g.HoveredWindow;
@@ -437,9 +443,12 @@ void HandleZoomWithMouseWheel() {
 
 		if (g.IO.KeyCtrl)
 		{
+			float new_font_scale = ImClamp(window->FontWindowScale + g.IO.MouseWheel * 0.10f, 0.50f, 2.50f);
+			if (g.IO.MouseClicked[2]) {
+				new_font_scale = 1.0f;
+			};
 			// Zoom / Scale window. Based on imgui v1.45 implementation because new one calls a windows function to set the new window positions
 			// new imgui function impl in file: ..\REPENTOGON\libs\imgui\imgui.cpp - Line 9137 (Zoom / Scale window)
-			float new_font_scale = ImClamp(window->FontWindowScale + g.IO.MouseWheel * 0.10f, 0.50f, 2.50f);
 			float scale = new_font_scale / window->FontWindowScale;
 			const ImVec2 offset = ImVec2(window->Size.x * (1.0f - scale) * (g.IO.MousePos.x - window->Pos.x) / window->Size.x,
 				window->Size.y * (1.0f - scale) * (g.IO.MousePos.y - window->Pos.y) / window->Size.y);
@@ -724,5 +733,6 @@ extern ImGuiKey AddChangeKeyButton(bool isController, bool& wasPressed);
 extern void AddWindowContextMenu(bool* pinned);
 extern void HelpMarker(const char* desc);
 extern bool WindowBeginEx(const char* name, bool* p_open, ImGuiWindowFlags flags);
+extern float GetAvailableMenuSpace();
 extern float WINMouseWheelMove_Vert;  //I don't know if this needs to be added to the end of the file, but I don't see any errors
 extern float WINMouseWheelMove_Hori;

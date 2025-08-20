@@ -338,6 +338,35 @@ LUA_FUNCTION(Lua_PlayCutscene) {
 
 }
 
+LUA_FUNCTION(Lua_SpawnBoss) {
+	const unsigned int type = (unsigned int)luaL_checkinteger(L, 1);
+	const unsigned int var = (unsigned int)luaL_checkinteger(L, 2);
+	const unsigned int sub = (unsigned int)luaL_checkinteger(L, 3);
+	Vector* pos = lua::GetLuabridgeUserdata<Vector*>(L, 4, lua::Metatables::VECTOR, "Vector");
+	Vector* vel = lua::GetLuabridgeUserdata<Vector*>(L, 5, lua::Metatables::VECTOR, "Vector");
+	const unsigned int seed = (unsigned int)luaL_optinteger(L, 7, g_Game->GetCurrentRoomDesc()->SpawnSeed);
+
+	Entity_NPC* ent = nullptr;
+
+	if ((type > 9) && (type < 990)) {
+		if (!lua_isnil(L, 6)) {
+			Entity* spawner = lua::GetLuabridgeUserdata<Entity*>(L, 6, lua::Metatables::ENTITY, "Entity");
+			ent = (Entity_NPC*)g_Game->Spawn(type, var, *pos, *vel, spawner, sub, seed, 0);
+			ent->_isBoss = true;
+		}
+		else {
+			ent = (Entity_NPC*)g_Game->Spawn(type, var, *pos, *vel, nullptr, sub, seed, 0);
+			ent->_isBoss = true;
+		}
+		lua::luabridge::UserdataPtr::push(L, ent, lua::GetMetatableKey(lua::Metatables::ENTITY_NPC));
+
+	}
+	else {
+		return luaL_error(L, "SpawnBoss only works with NPC-able entity types");
+	}
+	return 1;
+}
+
 LUA_FUNCTION(Lua_GetCutsceneByName) {
 	string text = string(luaL_checkstring(L, 1));
 	if (XMLStuff.CutsceneData->byname.count(text) > 0)
@@ -441,15 +470,6 @@ LUA_FUNCTION(Lua_IsaacGetCollectibleSpawnPosition) {
 	*toLua = result;
 
 	return 1;
-}
-
-LUA_FUNCTION(Lua_IsaacClearBossHazards) {
-	if (g_Game == nullptr || g_Game->_room == nullptr) {
-		return luaL_error(L, "Must be in a room to use this!");
-	}
-	bool ignoreNPCs = lua::luaL_optboolean(L, 1, false);
-	Isaac::ClearBossHazards(ignoreNPCs);
-	return 0;
 }
 
 LUA_FUNCTION(Lua_IsaacFindInCapsule)
@@ -608,6 +628,12 @@ LUA_FUNCTION(Lua_ClearChallenge) {
 	return 1;
 }
 
+LUA_FUNCTION(Lua_UndoChallenge) {
+	int challengeid = (int)luaL_checkinteger(L, 1);
+	UndoChallenge(challengeid);
+	return 1;
+}
+
 LUA_FUNCTION(Lua_GetModChallengeClearCount) {
 	int challengeid = (int)luaL_checkinteger(L, 1);
 	XMLAttributes node = XMLStuff.ChallengeData->GetNodeById(challengeid);
@@ -654,6 +680,11 @@ LUA_FUNCTION(Lua_GetRGON_Changelog) {
 	return 1;
 };
 
+namespace {
+	std::string currentIconPath = "";
+	HANDLE currentIcon = NULL;
+}
+
 LUA_FUNCTION(Lua_SetIcon) {
 //	int iconsize = luaL_optinteger(L, 2, ICON_SMALL);
 	int resolution=16;
@@ -697,12 +728,22 @@ LUA_FUNCTION(Lua_SetIcon) {
 	std::string modpath = str;
 	std::string fullpath;
 	g_Manager->GetModManager()->TryRedirectPath(&fullpath,&modpath);
-	HANDLE icon=LoadImageA(nullptr, fullpath.c_str(), IMAGE_ICON, resolution, resolution, LR_LOADFROMFILE | LR_SHARED);
-	if (!icon) {
-		return luaL_error(L, "Icon has failed to load!");
-	};
-	SendMessage(GetActiveWindow(), WM_SETICON, ICON_SMALL, (LPARAM)icon);
-	SendMessage(GetActiveWindow(), WM_SETICON, ICON_BIG, (LPARAM)icon);
+
+	if (currentIcon == NULL || currentIconPath.empty() || currentIconPath != fullpath) {
+		HANDLE newIcon = LoadImageA(nullptr, fullpath.c_str(), IMAGE_ICON, resolution, resolution, LR_LOADFROMFILE);
+		if (newIcon == NULL) {
+			return luaL_error(L, "Icon has failed to load!");
+		}
+		if (currentIcon != NULL) {
+			DestroyIcon((HICON)currentIcon);
+		}
+		currentIcon = newIcon;
+		currentIconPath = fullpath;
+	}
+
+	SendMessage(GetActiveWindow(), WM_SETICON, ICON_SMALL, (LPARAM)currentIcon);
+	SendMessage(GetActiveWindow(), WM_SETICON, ICON_BIG, (LPARAM)currentIcon);
+
 	return 0;
 };
 
@@ -761,7 +802,6 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 
 	// new functions
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "CanStartTrueCoop", Lua_IsaacCanStartTrueCoop);
-	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "ClearBossHazards", Lua_IsaacClearBossHazards);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "CreateTimer", Lua_CreateTimer);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "DrawQuad", Lua_DrawQuad);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "DrawLine", Lua_DrawLine);
@@ -790,6 +830,7 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 	//lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "Resume", Lua_IsaacResume); //not done, feel free to pick these up they suck
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "IsChallengeDone", Lua_IsChallengeDone);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "ClearChallenge", Lua_ClearChallenge);
+	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "UnClearChallenge", Lua_UndoChallenge);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "MarkChallengeAsNotDone", Lua_UnDoChallenge);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "GetModChallengeClearCount", Lua_GetModChallengeClearCount);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "GetBossColorIdxByName", Lua_GetBossColorIdxByName);
@@ -801,6 +842,8 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "GetAxisAlignedUnitVectorFromDir", Lua_GetAxisAlignedUnitVectorFromDir);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "StartDailyGame", Lua_StartDailyGame);
 	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "IsShuttingDown", Lua_IsaacIsShuttingDown);
+
+	lua::RegisterGlobalClassFunction(_state, lua::GlobalClasses::Isaac, "SpawnBoss", Lua_SpawnBoss);
 
 	SigScan scanner("558bec83e4f883ec14535657f3");
 	bool result = scanner.Scan();

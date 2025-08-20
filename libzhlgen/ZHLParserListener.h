@@ -26,6 +26,9 @@ public:
   virtual void enterTypeInfoDef(ZHLParser::TypeInfoDefContext *ctx) = 0;
   virtual void exitTypeInfoDef(ZHLParser::TypeInfoDefContext *ctx) = 0;
 
+  virtual void enterAsmDef(ZHLParser::AsmDefContext *ctx) = 0;
+  virtual void exitAsmDef(ZHLParser::AsmDefContext *ctx) = 0;
+
   virtual void enterFunction(ZHLParser::FunctionContext *ctx) = 0;
   virtual void exitFunction(ZHLParser::FunctionContext *ctx) = 0;
 

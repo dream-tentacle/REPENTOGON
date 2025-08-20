@@ -1,5 +1,6 @@
 #pragma once
 #include "../REPENTOGONOptions.h"
+#include "../SaveSyncing/SaveSyncing.h"
 #include "IconsFontAwesome6.h"
 #include "ImGuiEx.h"
 #include "IsaacRepentance.h"
@@ -9,6 +10,11 @@
 extern int handleWindowFlags(int flags);
 extern void HelpMarker(const char* desc);
 extern bool WindowBeginEx(const char* name, bool* p_open, ImGuiWindowFlags flags);
+
+static bool PromptUserYesNo(const char* prompt) {
+    const int response = MessageBoxA(0, prompt, "REPENTOGON", MB_ICONINFORMATION | MB_YESNO);
+    return response == IDOK || response == IDYES;
+}
 
 struct GameOptionsWindow : ImGuiWindowObject {
     GameOptionsWindow()
@@ -21,6 +27,14 @@ struct GameOptionsWindow : ImGuiWindowObject {
     const char* consoleFontModes[3] = { "Default", "Small", "Tiny" };
     const char* offOnModes[2] = { "Off", "On" };
     const char* unifontRenderMode[5] = { "Normal: 13px, only non-latin chars", "LargePerfect: 16px", "Medium: 14px", "TinyPerfect: 16px and 0.5 scale", "TinyLow: 8px" };
+    const char* jacobAndEsauControlModes[2] = { "Classic", "Better" };
+
+    const char* saveImportExportSlots[4] = { "ALL", "1", "2", "3"};
+    int selectedSaveImportExportSlot = 0;
+    bool saveManagementResetMenu = false;
+    std::optional<bool> saveManagementSyncResult = std::nullopt;
+    std::optional<bool> saveManagementImportResult = std::nullopt;
+    std::optional<bool> saveManagementExportResult = std::nullopt;
 
     void InitAfterLanguageAvaliable(){
         extraHudModes[0] = LANG.OPT_EXTRA_HUD_MODES_OFF;
@@ -42,11 +56,16 @@ struct GameOptionsWindow : ImGuiWindowObject {
         offOnModes[0] = LANG.OPT_OFF_ON_MODES_OFF;
         offOnModes[1] = LANG.OPT_OFF_ON_MODES_ON;
 
+        jacobAndEsauControlModes[0] = LANG.OPT_JACOB_ESAU_CONTROLS_MODES_CLASSIC;
+		jacobAndEsauControlModes[1] = LANG.OPT_JACOB_ESAU_CONTROLS_MODES_BETTER;
+
         unifontRenderMode[0] = LANG.OPT_UNIFONT_RENDER_MODE_NORMAL;
         unifontRenderMode[1] = LANG.OPT_UNIFONT_RENDER_MODE_LARGE;
         unifontRenderMode[2] = LANG.OPT_UNIFONT_RENDER_MODE_MEDIUM;
         unifontRenderMode[3] = LANG.OPT_UNIFONT_RENDER_MODE_TINY;
         unifontRenderMode[4] = LANG.OPT_UNIFONT_RENDER_MODE_TINY_LOW;
+
+        saveImportExportSlots[0] = LANG.OPT_SAVE_MANAGEMENT_ALL_SLOTS;
     }
 
     template <typename T>
@@ -71,6 +90,28 @@ struct GameOptionsWindow : ImGuiWindowObject {
     {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
+    }
+
+    void AddSaveManagementButton(const char* label, const char* mark, const char* prompt, std::optional<bool>& result, std::function<bool()> buttonClickedFunc) {
+        ImGui::BeginDisabled(result.has_value());
+        AddNewTableRow();
+        if (ImGui::Button(label)) {
+            if (PromptUserYesNo(prompt)) {
+                result = buttonClickedFunc();
+                g_MenuManager->GetMenuSave()->Reset();
+                saveManagementResetMenu = true;
+            }
+        }
+        ImGui::SameLine();
+        HelpMarker(mark);
+        ImGui::EndDisabled();
+        if (result.has_value()) {
+            const bool success = *result;
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, success ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 0, 0, 255));
+            ImGui::Text(success ? LANG.OPT_SAVE_MANAGEMENT_SUCCESS : LANG.OPT_SAVE_MANAGEMENT_FAILED);
+            ImGui::PopStyleColor();
+        }
     }
 
     void Draw(bool isImGuiActive)
@@ -107,7 +148,12 @@ struct GameOptionsWindow : ImGuiWindowObject {
                         AddNewTableRow();
                         ImGui::SliderInt(LANG.OPT_ANNOUNCER_VOICE_MODE, &g_Manager->GetOptions()->_announcerVoiceMode, 0, 2, announcerModes[g_Manager->GetOptions()->_announcerVoiceMode], ImGuiSliderFlags_NoInput);
                         AddResetButton(++resetCounter, g_Manager->GetOptions()->_announcerVoiceMode, 0);
-
+                        AddNewTableRow();
+                        ImGui::SliderInt(LANG.OPT_JACOB_ESAU_CONTROLS_MODE, &g_Manager->GetOptions()->_jacobEsauControls, 0, 1, jacobAndEsauControlModes[g_Manager->GetOptions()->_jacobEsauControls], ImGuiSliderFlags_NoInput);
+                        AddResetButton(++resetCounter, g_Manager->GetOptions()->_jacobEsauControls, 0);
+                        AddNewTableRow();
+                        ImGui::Checkbox(LANG.OPT_ASCENT_VOICEOVER, &g_Manager->GetOptions()->_ascentVoiceover);
+                        AddResetButton(++resetCounter, g_Manager->GetOptions()->_ascentVoiceover, true);
                         ImGui::EndTable();
                     }
                     ImGui::EndTabItem();
@@ -271,9 +317,9 @@ struct GameOptionsWindow : ImGuiWindowObject {
                         ImGui::Checkbox(LANG.OPT_MISC_ENABLE_CTRL_HOTPLUG, &g_Manager->GetOptions()->_controlHotplugEnabled);
                         AddResetButton(++resetCounter, g_Manager->GetOptions()->_controlHotplugEnabled, true);
                         AddNewTableRow();
-                        ImGui::Checkbox(LANG.OPT_MISC_USE_STEAM_CLOUD, &g_Manager->GetOptions()->_enableSteamCloud);
-                        AddResetButton(++resetCounter, g_Manager->GetOptions()->_enableSteamCloud, true);
-                        AddNewTableRow();
+                        //ImGui::Checkbox(LANG.OPT_MISC_USE_STEAM_CLOUD, &g_Manager->GetOptions()->_enableSteamCloud); //Dont add this back!, it can fuck up saves pretty badly to toggle this ingame, leaving it commented so noone is tempted to add it back
+                        //AddResetButton(++resetCounter, g_Manager->GetOptions()->_enableSteamCloud, true);
+                        //AddNewTableRow();
                         ImGui::Checkbox(LANG.OPT_MISC_PAUSE_ON_FOCUS_LOST, &g_Manager->GetOptions()->_enablePauseOnFocusLost);
                         AddResetButton(++resetCounter, g_Manager->GetOptions()->_enablePauseOnFocusLost, true);
 
@@ -354,16 +400,83 @@ struct GameOptionsWindow : ImGuiWindowObject {
                         HelpMarker(LANG.OPT_REPENTOGON_DEBUG_FIND_IN_RADIUS_MARK);
                         AddResetButton(++resetCounter, repentogonOptions.renderDebugFindInRadius, false);
 
+                        AddNewTableRow();
+                        ImGui::Checkbox(LANG.OPT_REPENTOGON_DISABLE_EXIT_PROMPT, &repentogonOptions.disableExitPrompt);
+                        ImGui::SameLine();
+                        HelpMarker(LANG.OPT_REPENTOGON_DISABLE_EXIT_PROMPT_MARK);
+                        AddResetButton(++resetCounter, repentogonOptions.disableExitPrompt, false);
 
                         ImGui::EndTable();
                     }
                     ImGui::EndTabItem();
                 }
+
+                if (SaveSyncing::USE_SEPARATE_REPENTOGON_SAVE_FILES && ImGui::BeginTabItem(LANG.OPT_SAVE_MANAGEMENT)) {
+                    if (ImGui::BeginTable("SaveManagement_Table", 2, ImGuiTableFlags_SizingStretchProp)) {
+                        // Save Management options/utilities that can immediately modify save data are only available on the title/save menus when no save file is loaded.
+                        const bool saveManagementAllowed = !Isaac::IsInGame() && g_MenuManager && (g_MenuManager->_selectedMenuID == 1 || g_MenuManager->_selectedMenuID == 2);
+                        if (!saveManagementAllowed) {
+                            AddNewTableRow();
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 0, 0, 255));
+                            ImGui::Text(LANG.OPT_SAVE_MANAGEMENT_DISABLED_REASON);
+                            ImGui::PopStyleColor();
+                        }
+
+                        AddNewTableRow();
+                        if (ImGui::Checkbox(LANG.OPT_SAVE_MANAGEMENT_ENABLE_SAVE_SYNCING, SaveSyncing::syncStatus.GetEnabledPtr())) {
+                            SaveSyncing::syncStatus.SaveToJson();
+                        }
+                        ImGui::SameLine();
+                        HelpMarker(LANG.OPT_SAVE_MANAGEMENT_ENABLE_SAVE_SYNCING_MARK);
+                        AddResetButton(++resetCounter, *SaveSyncing::syncStatus.GetEnabledPtr(), true);
+
+                        ImGui::BeginDisabled(!saveManagementAllowed);
+
+                        AddSaveManagementButton(
+                            LANG.OPT_SAVE_MANAGEMENT_SYNC,
+                            LANG.OPT_SAVE_MANAGEMENT_SYNC_MARK,
+                            LANG.OPT_SAVE_MANAGEMENT_SYNC_PROMPT,
+                            saveManagementSyncResult,
+                            []() { return SaveSyncing::PerformVanillaSaveSynchronization(false); });
+
+                        AddNewTableRow();
+                        ImGui::SeparatorText(LANG.OPT_SAVE_MANAGEMENT_IMPORT_EXPORT);
+
+                        AddNewTableRow();
+                        ImGui::SetNextItemWidth(150);
+                        if (ImGui::Combo(LANG.OPT_SAVE_MANAGEMENT_SAVE_SLOT, &selectedSaveImportExportSlot, saveImportExportSlots, IM_ARRAYSIZE(saveImportExportSlots))) {
+                            saveManagementImportResult = std::nullopt;
+                            saveManagementExportResult = std::nullopt;
+                        }
+
+                        AddSaveManagementButton(
+                            LANG.OPT_SAVE_MANAGEMENT_IMPORT_FROM_REPENTANCE,
+                            LANG.OPT_SAVE_MANAGEMENT_IMPORT_FROM_REPENTANCE_MARK,
+                            LANG.OPT_SAVE_MANAGEMENT_IMPORT_FROM_REPENTANCE_PROMPT,
+                            saveManagementImportResult,
+                            [this]() { return SaveSyncing::ImportFrom(SaveSyncing::REPENTANCE, selectedSaveImportExportSlot); });
+                        AddSaveManagementButton(
+                            LANG.OPT_SAVE_MANAGEMENT_EXPORT_TO_REPENTANCE,
+                            LANG.OPT_SAVE_MANAGEMENT_EXPORT_TO_REPENTANCE_MARK,
+                            LANG.OPT_SAVE_MANAGEMENT_EXPORT_TO_REPENTANCE_PROMPT,
+                            saveManagementExportResult,
+                            [this]() { return SaveSyncing::ExportTo(SaveSyncing::REPENTANCE, selectedSaveImportExportSlot); });
+
+                        ImGui::EndDisabled();
+                        ImGui::EndTable();
+                    }
+                    ImGui::EndTabItem();
+                } else if (saveManagementResetMenu) {
+                    saveManagementSyncResult = std::nullopt;
+                    saveManagementImportResult = std::nullopt;
+                    saveManagementExportResult = std::nullopt;
+                    saveManagementResetMenu = false;
+                }
                 ImGui::EndTabBar();
             }
-
-            ImGui::End(); // close window element
         }
+
+        ImGui::End(); // end window element
     }
 };
 

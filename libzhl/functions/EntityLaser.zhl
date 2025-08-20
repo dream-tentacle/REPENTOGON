@@ -16,23 +16,33 @@ __thiscall void Entity_Laser::ClearLaserSamples();
 "558bec6aff68????????64a1????????50515657a1????????33c5508d45??64a3????????8bf9897d??e8????????c745??000000008d8f????????c707":
 __thiscall void Entity_Laser::Constructor();
 
+"558bec81ec9400000056":
+__thiscall ColorMod* Entity_Laser::CalculateTearColor(ColorMod* buffer);
+
 struct Entity_Laser depends (BitSet128, HomingLaser) : public Entity { {{
-	inline uint32_t* GetHomingType() { return (uint32_t*)((char*)this + 0x4cc); }
-	inline float* GetScale() { return (float*)((char*)this + 0x4d8); }
+	inline uint32_t* GetHomingType() { return &this->_homingType; }
+	inline float* GetScale() { return &this->_scale; }
 	
-	inline int* GetTimeout() { return (int*)((char*)this + 0x450); }
-	inline bool* GetShrink() { return (bool*)((char*)this + 0x456); }
-	inline bool* GetDisableFollowParent() { return (bool*)((char*)this + 0x4dc); }
-	inline bool* GetOneHit() { return (bool*)((char*)this + 0x50d); }
-	inline std_vector_uint* GetHitList() { return (std_vector_uint*)((char*)this + 0x518); }
+	inline int* GetTimeout() { return &this->_timeout; }
+	inline bool* GetShrink() { return &this->_shrink; }
+	inline bool* GetDisableFollowParent() { return &this->_disableFollowParent; }
+	inline bool* GetOneHit() { return &this->_oneHit; }
+	inline std_vector_uint* GetHitList() { return &this->_hitList; }
 
 }} 
-	BitSet128 _tearFlags : 0x420;
-	bool _sampleLaser : 0x455;
-	HomingLaser _homingLaser : 0x45c;
-	bool _multidimensionalTouched: 0x4f8;
-	bool _prismTouched: 0x50c;
-	float _damageMultiplier : 0x514;
+	BitSet128 _tearFlags : 0x428;
+	int _timeout : 0x458;
+	bool _sampleLaser : 0x45d;
+	bool _shrink : 0x45e;
+	HomingLaser _homingLaser : 0x464;
+	uint32_t _homingType : 0x4d4;
+	float _scale : 0x4e0;
+	bool _disableFollowParent : 0x4e4;
+	bool _multidimensionalTouched: 0x500;
+	bool _prismTouched: 0x514;
+	bool _oneHit: 0x515;
+	float _damageMultiplier : 0x51c;
+	std_vector_uint _hitList : 0x520;
 
 	__vtable {
 		skip; // Free
@@ -59,6 +69,7 @@ struct Entity_Laser depends (BitSet128, HomingLaser) : public Entity { {{
 		void Remove();
 
 		skip; // TriggerGlowingHourglass
+		skip; // ???
 		skip; // GetRenderZ
 		skip; // CanOverwrite
 		skip; // SetColor
@@ -73,4 +84,4 @@ struct Entity_Laser depends (BitSet128, HomingLaser) : public Entity { {{
 		skip; // ResetColor
 		skip; // LoadEntityConfig
 	};
-} : 0x560;
+} : 0x568;

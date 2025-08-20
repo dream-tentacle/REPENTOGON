@@ -10,4 +10,10 @@ namespace ASMPatches {
 
 	void NativeRepentogonResources();
 	void PatchGotInvaldParameterReadingChallengesXml();
+
+	bool SkipWombAchievementBlock();
+
+	void DisableExitPrompt();
+	void PatchLeaderboardGoalSprite();
+
 }

@@ -1,5 +1,6 @@
 #include "IsaacRepentance.h"
 
+#include "ASMDefinition.h"
 #include "ASMPatcher.hpp"
 #include "../ASMPatches.h"
 
@@ -7,6 +8,17 @@
 #include "../../LuaInit.h"
 #include "Log.h"
 #include "../../Patches/MainMenuBlock.h"
+
+static inline void* get_sig_address(const char* signature, const char* location, const char* callbackName)
+{
+	SigScan scanner(signature);
+	if (!scanner.Scan())
+	{
+		ZHL::Log("[ASSERT] [ASMPatch] Did not find \"%s\" for %s patch\n", signature, callbackName);
+		assert(false);
+	}
+	return scanner.GetAddress();
+}
 
 /* * MC_PRE_LASER_COLLISION * *
 * There is no function you can hook that would allow you to skip a laser "collision".
@@ -40,9 +52,7 @@ bool __stdcall RunPreLaserCollisionCallback(Entity_Laser* laser, Entity* entity)
 
 // This patch injects the PRE_LASER_COLLISION callback for "sample" lasers (lasers that curve, ie have multiple sample points).
 void PatchPreSampleLaserCollision() {
-	SigScan scanner("8b48??83f90975??c780????????00000000");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::PreSampleLaserCollision);
 
 	printf("[REPENTOGON] Patching Entity_Laser::damage_entities for MC_PRE_LASER_COLLISION (sample laser) at %p\n", addr);
 
@@ -91,16 +101,8 @@ void PatchPreLaserCollision() {
 * TakeDamage function parameters in memory and can modify them directly.
 * We need to patch into both Entity::TakeDamage AND EntityPlayer::TakeDamage.
 */
-bool __stdcall ProcessPreDamageCallback(Entity* entity, char* ebp, bool isPlayer) {
+bool __stdcall ProcessPreDamageCallback(Entity* entity, float* damage, int* damageHearts, uint64_t* damageFlags, EntityRef* source, int* damageCountdown, const bool isPlayer) {
 	const int callbackid = 11;
-
-	// Obtain inputs as offsets from EBP (same way the compiled code reads them).
-	// As pointers so we can modify them :)
-	uint64_t* damageFlags = (uint64_t*)(ebp + 0x0C);
-	float* damage = (float*)(ebp + 0x08);
-	int* damageHearts = isPlayer ? (int*)(ebp - 0x100) : nullptr;
-	EntityRef** source = (EntityRef**)(ebp + 0x14);
-	int* damageCountdown = (int*)(ebp + 0x18);
 
 	if (VanillaCallbackState.test(callbackid)) {
 		lua_State* L = g_LuaEngine->_state;
@@ -113,22 +115,20 @@ bool __stdcall ProcessPreDamageCallback(Entity* entity, char* ebp, bool isPlayer
 		caller.push(callbackid)
 			.push(entityType)
 			.push(entity, lua::Metatables::ENTITY);
-		if (isPlayer) {
+		if (isPlayer && damageHearts) {
 			caller.push(*damageHearts);
-		}
-		else {
+		} else {
 			caller.push(*damage);
 		}
 		caller.push(*damageFlags)
-			.push(*source, lua::Metatables::ENTITY_REF)
+			.push(source, lua::Metatables::ENTITY_REF)
 			.push(*damageCountdown);
 		lua::LuaResults lua_result = caller.call(1);
 
 		if (!lua_result) {
 			if (lua_isboolean(L, -1)) {
 				return lua_toboolean(L, -1);
-			}
-			else if (lua_istable(L, -1)) {
+			} else if (lua_istable(L, -1)) {
 				const uint64_t originalDamageFlags = *damageFlags;
 
 				// New table return format for overriding values.
@@ -141,60 +141,45 @@ bool __stdcall ProcessPreDamageCallback(Entity* entity, char* ebp, bool isPlayer
 							if (newDamage < 0) {
 								newDamage = 0;
 							}
-							if (isPlayer) {
-								*damageHearts = (int)newDamage;
+							if (isPlayer && damageHearts) {
+								*damageHearts = (int)std::round(newDamage);
 							}
 							*damage = newDamage;
-						}
-						else if (key == "DamageFlags" && lua_isinteger(L, -1)) {
+						} else if (key == "DamageFlags" && lua_isinteger(L, -1)) {
 							*damageFlags = lua_tointeger(L, -1);
-						}
-						else if (key == "DamageCountdown" && lua_isnumber(L, -1)) {
+						} else if (key == "DamageCountdown" && lua_isnumber(L, -1)) {
 							*damageCountdown = (int)lua_tonumber(L, -1);
 						}
 					}
 					lua_pop(L, 1);
 				}
-				
+
 				// Retroactively fix the behaviour of certain DamageFlags.
 				// For example, ones that the game normally checks for BEFORE this callback runs.
 				const uint64_t flagsAdded = (*damageFlags) & ~originalDamageFlags;
-				const uint64_t flagsRemoved = originalDamageFlags & ~(*damageFlags);
-				const uint64_t flagsModified = flagsAdded | flagsRemoved;
+				//const uint64_t flagsRemoved = originalDamageFlags & ~(*damageFlags);
+				//const uint64_t flagsModified = flagsAdded | flagsRemoved;
 
 				if (isPlayer) {
-					// The game previously set a boolean to decide whether or not LevelStateFlag.STATE_REDHEART_DAMAGED
-					// should be set upon taking red heart damage, incurring devil deal penalties, etc.
-					// It's FALSE if either the DAMAGE_RED_HEARTS or DAMAGE_NO_PENALTIES is present, TRUE otherwise.
-					// I retroactively update the boolean again here in case either of these flags are added or removed.
-					// Relevant signature: 81e120000010
-					if ((flagsModified & (1 << 5 | 1 << 28)) != 0) {
-						*(bool*)(ebp - 0x105) = (*damageFlags & (1 << 5 | 1 << 28)) == 0;
-					}
-
-					// DamageFlag.DAMAGE_FAKE
-					if ((flagsAdded & (1 << 21)) != 0) {
+					if (damageHearts && (flagsAdded & DAMAGE_FAKE) != 0) {
 						*damageHearts = 0;
 					}
 
 					// DamageFlag.DAMAGE_NO_MODIFIERS affects the damage value before the callback runs, but
 					// IDK if I want to bother trying to fix that retroactively. Just change the damage yourself.
-				}
-				else {
-					// DamageFlag.DAMAGE_FIRE
-					if ((flagsAdded & (1 << 1)) != 0) {
+				} else {
+					if ((flagsAdded & DAMAGE_FIRE) != 0) {
 						if (*entity->GetFireDamageCountdown() > 0) {
 							return false;
 						}
 						*entity->GetFireDamageCountdown() = 10;
 					}
-					// DamageFlag.DAMAGE_COUNTDOWN
-					if ((flagsAdded & (1 << 6)) != 0 && *entity->GetDamageCountdown() > 0) {
+					if ((flagsAdded & DAMAGE_COUNTDOWN) != 0 && *entity->GetDamageCountdown() > 0) {
 						return false;
 					}
 					// If the DAMAGE_COUNTDOWN flag is currently present, set the entity's
 					// DamageCountdown to the now potentially-modified value.
-					if ((*damageFlags & (1 << 6)) != 0) {
+					if ((*damageFlags & DAMAGE_COUNTDOWN) != 0) {
 						*entity->GetDamageCountdown() = *damageCountdown;
 					}
 				}
@@ -202,7 +187,7 @@ bool __stdcall ProcessPreDamageCallback(Entity* entity, char* ebp, bool isPlayer
 		}
 	}
 
-	if (isPlayer) {
+	if (isPlayer && damageHearts) {
 		*damage = (float)*damageHearts;
 	}
 
@@ -211,28 +196,52 @@ bool __stdcall ProcessPreDamageCallback(Entity* entity, char* ebp, bool isPlayer
 
 void InjectPreDamageCallback(void* addr, bool isPlayer) {
 	printf("[REPENTOGON] Patching %s::TakeDamage for MC_ENTITY_TAKE_DMG at %p\n", isPlayer ? "Entity_Player" : "Entity", addr);
-	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS - ASMPatch::SavedRegisters::Registers::EAX, true);
+
+	const int lowerFlagsOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_FlagsOffset) + 2);
+	const int upperFlagsOffset = lowerFlagsOffset + 4;
+	const int damageOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_AmountFloatOffset) + 4);
+	const int sourceOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_SourceOffset) + 2);
+	const int countdownOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_CountdownOffset) + 2);
+	const int damageHeartsOffset = *(int*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PlayerAmountHeartsOffset) + 4);
+	const int isRedHeartDamageOffset = *(int*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PlayerRedHeartDamagedOffset) + 2);
+	const int playerCopiedLowerFlagsOffset = *(int*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PlayerLowerFlagsOffset) + 2);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS & ~ASMPatch::SavedRegisters::Registers::EAX, true);
 	ASMPatch patch;
 	patch.AddBytes("\x58\x58\x58\x58\x58")  // Pop EAX x5 to remove the overridden function's inputs from the stack.
 		.PreserveRegisters(savedRegisters)
 		.AddBytes("\x31\xC0");  // xor eax,eax
 	if (isPlayer) {
-		patch.AddBytes("\xB0\x01");  // Move Al, 0x1
+		patch.AddBytes("\xB0\x01");  // mov al, 0x1
 	}
-	patch.Push(ASMPatch::Registers::EAX)  // Push a boolean to identify if this is EntityPlayer:TakeDamge
-		.Push(ASMPatch::Registers::EBP)  // Push EBP (We'll get other inputs as offsets from this)
+	patch.Push(ASMPatch::Registers::EAX)  // Push a boolean to identify if this is EntityPlayer:TakeDamage
+		.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)&countdownOffset, 0x4)).Push(ASMPatch::Registers::EBX)  // lea ebx [ebp+?] ; push ebx
+		.Push(ASMPatch::Registers::EBP, sourceOffset)
+		.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)&lowerFlagsOffset, 0x4)).Push(ASMPatch::Registers::EBX);
+	if (isPlayer) {
+		patch.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)&damageHeartsOffset, 0x4)).Push(ASMPatch::Registers::EBX);
+	} else {
+		patch.Push(0x0);
+	}
+	patch.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)&damageOffset, 0x4)).Push(ASMPatch::Registers::EBX)
 		.Push(ASMPatch::Registers::EDI)  // Push Entity pointer
 		.AddInternalCall(ProcessPreDamageCallback);  // Run the new MC_ENTITY_TAKE_DMG callback
 	if (isPlayer) {
-		// For the player, also copy the (potentially modified) lower DamageFlags to [EBP-0x104]
-		patch.AddBytes("\x8B\x75\x0C")  // mov esi,dword ptr [EBP+0x0C]
-			.AddBytes("\x89\xB5\xFC\xFE\xFF\xFF");  // mov dword ptr [EBP-0x104],esi
+		// For the player, also copy the (potentially modified) lower DamageFlags to [EBP+?]
+		patch.AddBytes("\x8B\x9D").AddBytes(ByteBuffer().AddAny((char*)&lowerFlagsOffset, 0x4))  // mov ebx,dword ptr [EBP+?]
+			.AddBytes("\x89\x9D").AddBytes(ByteBuffer().AddAny((char*)&playerCopiedLowerFlagsOffset, 0x4))  // mov dword ptr [EBP+?],ebx
+			// Update a boolean that was previously populated based on whether the DamageFlags contained DAMAGE_RED_HEARTS or DAMAGE_NO_PENALTIES.
+			// Affects whether LevelStateFlag.STATE_REDHEART_DAMAGED is set, potentially among other things.
+			.AddBytes("\xC6\x85").AddBytes(ByteBuffer().AddAny((char*)&isRedHeartDamageOffset, 0x4)).AddBytes("\x01")
+			.AddBytes("\x81\xE3\x20").AddZeroes(2).AddBytes("\x10")  // and ebx,0x10000020 (DAMAGE_RED_HEARTS | DAMAGE_NO_PENALTIES)
+			.AddBytes("\x74\x07")  // JZ (set to 0 if neither flag is present)
+			.AddBytes("\xC6\x85").AddBytes(ByteBuffer().AddAny((char*)&isRedHeartDamageOffset, 0x4)).AddZeroes(1);
 	}
 	patch.RestoreRegisters(savedRegisters);
 	if (!isPlayer) {
 		// For non-players, also copy the (potentially modified) DamageFlags into EBX and ESI
-		patch.AddBytes("\x8B\x5D\x0C")  // mov ebx,dword ptr [EBP+0x0C]
-			.AddBytes("\x8B\x75\x10");  // mov esi,dword ptr [EBP+0x10]
+		patch.AddBytes("\x8B\x9D").AddBytes(ByteBuffer().AddAny((char*)&lowerFlagsOffset, 0x4))  // mov ebx,dword ptr [EBP+?]
+			.AddBytes("\x8B\xB5").AddBytes(ByteBuffer().AddAny((char*)&upperFlagsOffset, 0x4));  // mov esi,dword ptr [EBP+?]
 	}
 	patch.AddRelativeJump((char*)addr + 0x5);
 	sASMPatcher.PatchAt(addr, &patch);
@@ -241,13 +250,8 @@ void InjectPreDamageCallback(void* addr, bool isPlayer) {
 // Patches overtop the existing calls to LuaEngine::Callback::EntityTakeDamage,
 // within the Entity::TakeDamage and EntityPlayer::TakeDamage functions respectively.
 void PatchPreEntityTakeDamageCallbacks() {
-	SigScan entityTakeDmgScanner("e8????????84c00f84????????8d4c24??e8????????f30f1045");
-	entityTakeDmgScanner.Scan();
-	InjectPreDamageCallback(entityTakeDmgScanner.GetAddress(), false);
-
-	SigScan playerTakeDmgScanner("e8????????84c00f84????????8bcfe8????????84c00f85????????83bf????????25");
-	playerTakeDmgScanner.Scan();
-	InjectPreDamageCallback(playerTakeDmgScanner.GetAddress(), true);
+	InjectPreDamageCallback(sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PreEntityCallback), false);
+	InjectPreDamageCallback(sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PrePlayerCallback), true);
 }
 
 // Even though I patched overtop the calls to this callback, super kill it for good measure.
@@ -262,16 +266,9 @@ HOOK_METHOD(LuaEngine, EntityTakeDamage, (Entity* entity, float damage, unsigned
 * Like before, we need to patch into both Entity::TakeDamage and EntityPlayer::TakeDamage.
 */
 
-void __stdcall ProcessPostDamageCallback(Entity* entity, char* ebp, bool isPlayer) {
+void __stdcall ProcessPostDamageCallback(Entity* entity, const float damage, const uint64_t damageFlags, EntityRef* source, const int damageCountdown, const bool isPlayer) {
 	const int callbackid = 1006;
 	if (CallbackState.test(callbackid - 1000)) {
-		// Obtain inputs as offsets from EBP (same way the compiled code reads them).
-		const unsigned __int64 damageFlags = *(unsigned __int64*)(ebp + 0x0C);
-		const float damage = *(float*)(ebp + 0x08);
-		const int damageHearts = (int)std::round(damage);
-		EntityRef* source = *(EntityRef**)(ebp + 0x14);
-		const int damageCountdown = *(int*)(ebp + 0x18);
-
 		if (isPlayer && source->_type == 33 && source->_variant == 4) {
 			// The white fireplace is a unique case where the game considers the player to have taken "damage"
 			// but no on-damage effets are triggered. Don't run the post-damage callback in this case.
@@ -287,9 +284,8 @@ void __stdcall ProcessPostDamageCallback(Entity* entity, char* ebp, bool isPlaye
 			.push(*entity->GetType())
 			.push(entity, lua::Metatables::ENTITY);
 		if (isPlayer) {
-			caller.push(damageHearts);
-		}
-		else {
+			caller.push((int)std::round(damage));
+		} else {
 			caller.push(damage);
 		}
 		caller.push(damageFlags)
@@ -302,22 +298,34 @@ void __stdcall ProcessPostDamageCallback(Entity* entity, char* ebp, bool isPlaye
 void InjectPostDamageCallback(void* addr, bool isPlayer) {
 	printf("[REPENTOGON] Patching %s::TakeDamage for MC_POST_ENTITY_TAKE_DMG at %p\n", isPlayer ? "Entity_Player" : "Entity", addr);
 	const int numOverriddenBytes = (isPlayer ? 10 : 5);
+
+	const int lowerFlagsOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_FlagsOffset) + 2);
+	const int upperFlagsOffset = lowerFlagsOffset + 4;
+	const int damageOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_AmountFloatOffset) + 4);
+	const int sourceOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_SourceOffset) + 2);
+	const int countdownOffset = *(int8_t*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_CountdownOffset) + 2);
+	const int damageHeartsOffset = *(int*)((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PlayerAmountHeartsOffset) + 4);
+
 	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
 	if (isPlayer) {
 		patch.AddBytes(ByteBuffer().AddAny((char*)addr, numOverriddenBytes));  // Restore the commands we overwrote
 		// The EntityPlayer::TakeDamage patch needs to ask Al if the damage occured.
 		// The Entity::TakeDamage patch doesn't need to do this since it is at a location that only runs after damage.
-		patch.AddBytes("\x84\xC0") // Test Al (Al?)
+		patch.AddBytes("\x84\xC0") // test al, al
 			.AddConditionalRelativeJump(ASMPatcher::CondJumps::JZ, (char*)addr + numOverriddenBytes);
 	}
 	patch.PreserveRegisters(savedRegisters)
 		.AddBytes("\x31\xC0");  // xor eax,eax
 	if (isPlayer) {
-		patch.AddBytes("\xB0\x01");  // Move Al, 0x1
+		patch.AddBytes("\xB0\x01");  // Move al, 0x1
 	}
-	patch.Push(ASMPatch::Registers::EAX)  // Push a boolean to identify if this is EntityPlayer:TakeDamge
-		.Push(ASMPatch::Registers::EBP)  // Push EBP (We'll get other inputs as offsets from this)
+	patch.Push(ASMPatch::Registers::EAX)  // Push a boolean to identify if this is EntityPlayer:TakeDamage
+		.Push(ASMPatch::Registers::EBP, countdownOffset)
+		.Push(ASMPatch::Registers::EBP, sourceOffset)
+		.Push(ASMPatch::Registers::EBP, upperFlagsOffset)
+		.Push(ASMPatch::Registers::EBP, lowerFlagsOffset)
+		.Push(ASMPatch::Registers::EBP, damageOffset)
 		.Push(ASMPatch::Registers::EDI)  // Push Entity pointer
 		.AddInternalCall(ProcessPostDamageCallback)  // Run the MC_POST_(ENTITY_)TAKE_DMG callback
 		.RestoreRegisters(savedRegisters);
@@ -331,13 +339,9 @@ void InjectPostDamageCallback(void* addr, bool isPlayer) {
 // These patches overwrite suitably-sized commands near where the respective TakeDamage functions would return.
 // The overridden bytes are restored by the patch.
 void PatchPostEntityTakeDamageCallbacks() {
-	SigScan entityTakeDmgScanner("5f5eb0015b8be55dc21400??????????f30f1041");
-	entityTakeDmgScanner.Scan();
-	InjectPostDamageCallback(entityTakeDmgScanner.GetAddress(), false);
-
-	SigScan playerTakeDmgScanner("8b4d??64890d????????595f5e8b4d??33cde8????????8be55dc2140068????????e8????????83c404833d????????ff0f85????????c745??0d000000");
-	playerTakeDmgScanner.Scan();
-	InjectPostDamageCallback(playerTakeDmgScanner.GetAddress(), true);
+	// Sig is 6 bytes before where we actually want to patch to avoid bleeding past the end of the function.
+	InjectPostDamageCallback((char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PostEntityCallback) + 0x6, false);
+	InjectPostDamageCallback(sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TakeDmg_PostPlayerCallback), true);
 }
 
 // End of POST_ENTITY_TAKE_DMG patches
@@ -364,11 +368,19 @@ bool __stdcall ProcessPrePlayerUseBombCallback(Entity_Player* player) {
 }
 
 void ASMPatchPrePlayerUseBomb() {
-	SigScan scanner("6a0068050200008bcf");
+	// Address of the conditional jump before the player places a bomb.
+	SigScan scanner("0f8f????????6a0068050200008bcfe8");
 	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* jumpAddr = scanner.GetAddress();
 
-	printf("[REPENTOGON] Patching Entity_Player::control_bombs (pre) at %p\n", addr);
+	// Get the address we should jump to if we want to cancel the player's bomb placement.
+	// Pull the jump offset from the existing conditional jump.
+	void* cancelAddr = (char*)jumpAddr + 0x6 + *(int*)ByteBuffer().AddAny((char*)jumpAddr + 0x2, 4).GetData();
+
+	// Address that we want to patch at, immediately after the existing conditional jump.
+	void* patchAddr = (char*)jumpAddr + 0x6;
+
+	printf("[REPENTOGON] Patching Entity_Player::control_bombs (pre) at %p\n", patchAddr);
 
 	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
@@ -377,10 +389,10 @@ void ASMPatchPrePlayerUseBomb() {
 		.AddInternalCall(ProcessPrePlayerUseBombCallback)  // Run MC_PRE_PLAYER_USE_BOMB
 		.AddBytes("\x84\xC0") // TEST AL, AL
 		.RestoreRegisters(savedRegisters)
-		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JE, (char*)addr + 0x7C5) // Jump for false (negate the bomb placement)
-		.AddBytes(ByteBuffer().AddAny((char*)addr, 0x7))  // Restore the 7 bytes we overwrote
-		.AddRelativeJump((char*)addr + 0x7);  // Jump for true (allow the bomb placement)
-	sASMPatcher.PatchAt(addr, &patch);
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JE, cancelAddr) // Jump for false (cancel the bomb placement)
+		.AddBytes(ByteBuffer().AddAny((char*)patchAddr, 0x7))  // Restore the 7 bytes we overwrote
+		.AddRelativeJump((char*)patchAddr + 0x7);  // Jump for true (allow the bomb placement)
+	sASMPatcher.PatchAt(patchAddr, &patch);
 }
 
 // MC_POST_PLAYER_USE_BOMB
@@ -399,7 +411,7 @@ void __stdcall ProcessPostPlayerUseBombCallback(Entity_Player* player, Entity_Bo
 }
 
 void ASMPatchPostPlayerUseBomb() {
-	SigScan scanner("8b7424??46897424??3b7424??0f8c????????5f");
+	SigScan scanner("8b4424??40894424??3b4424??0f8c????????5f");
 	scanner.Scan();
 	void* addr = scanner.GetAddress();
 
@@ -408,7 +420,7 @@ void ASMPatchPostPlayerUseBomb() {
 	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
 	patch.PreserveRegisters(savedRegisters)
-		.Push(ASMPatch::Registers::ESI)  // Push the BOMB
+		.Push(ASMPatch::Registers::ECX)  // Push the BOMB
 		.Push(ASMPatch::Registers::EDI)  // Push the PLAYER
 		.AddInternalCall(ProcessPostPlayerUseBombCallback)  // Run MC_POST_PLAYER_USE_BOMB
 		.RestoreRegisters(savedRegisters)
@@ -639,7 +651,7 @@ void ASMPatchPrePickupVoided() {
 		.AddInternalCall(RunPrePickupVoided)
 		.RestoreRegisters(savedRegisters)
 		.AddBytes("\x83\xC4\x04") // add esp, 4
-		.AddRelativeJump((char*)addr + 5); 
+		.AddRelativeJump((char*)addr + 5);
 	sASMPatcher.PatchAt(addr, &patch);
 }
 
@@ -867,7 +879,7 @@ bool __stdcall RunTrinketRenderCallback(PlayerHUD* playerHUD, uint32_t slot, Vec
 			.push(player, lua::Metatables::ENTITY_PLAYER)
 			.pushUserdataValue(cropOffset, lua::Metatables::VECTOR)
 			.call(1);
-		
+
 		if (!result) {
 			if (lua_istable(L, -1)) {
 				lua_pushnil(L);
@@ -966,7 +978,7 @@ void ASMPatchTrinketRender() {
 }
 
 //MC_PRE_PICKUP_UPDATE_GHOST_PICKUPS (1335)
-bool __stdcall RunPickupUpdatePickupGhostsCallback(Entity_Pickup* pickup) { 
+bool __stdcall RunPickupUpdatePickupGhostsCallback(Entity_Pickup* pickup) {
 	const int callbackid = 1335;
 
 	if (CallbackState.test(callbackid - 1000)) {
@@ -985,9 +997,9 @@ bool __stdcall RunPickupUpdatePickupGhostsCallback(Entity_Pickup* pickup) {
 			}
 		}
 	}
-	
-	return (g_Game->_playerManager.FirstCollectibleOwner(COLLECTIBLE_GUPPYS_EYE, nullptr, true) != nullptr && 
-		((pickup->IsChest(pickup->_variant) && pickup->_subtype != 0) || (pickup->_variant == 69 && !pickup->_dead)) 
+
+	return (g_Game->_playerManager.FirstCollectibleOwner(COLLECTIBLE_GUPPYS_EYE, nullptr, true) != nullptr &&
+		((pickup->IsChest(pickup->_variant) && pickup->_subtype != 0) || (pickup->_variant == 69 && !pickup->_dead))
 			&& (pickup->_timeout < 1) );
 }
 
@@ -1132,19 +1144,19 @@ void PreBirthPatch(void* addr, const bool isCambion) {
 }
 
 void ASMPatchPrePlayerGiveBirth() {
-	
+
 	SigScan cambionSig("818f????????000200000bc2");
 	cambionSig.Scan();
 	void* cambionAddr = cambionSig.GetAddress();
 	printf("[REPENTOGON] Patching Entity_Player::TakeDamage at %p for MC_PRE_PLAYER_GIVE_BIRTH_CAMBION\n", cambionAddr);
 	PreBirthPatch(cambionAddr, true);  // Cambion
-	
+
 	SigScan immaculateSig("818f????????000200000bc6");
 	immaculateSig.Scan();
 	void* immaculateAddr = immaculateSig.GetAddress();
 	printf("[REPENTOGON] Patching Entity_Player::TriggerHeartPickedUp at %p for MC_PRE_PLAYER_GIVE_BIRTH_IMMACULATE\n", immaculateAddr);
 	PreBirthPatch(immaculateAddr, false);  // Immaculate
-	
+
 }
 
 bool __stdcall RunPreTriggerBedSleepEffectCallback(Entity_Player* player) {
@@ -1167,7 +1179,7 @@ bool __stdcall RunPreTriggerBedSleepEffectCallback(Entity_Player* player) {
 				}
 			}
 		}
-	
+
 	return false;
 }
 
@@ -1282,7 +1294,7 @@ void ASMPatchesBedCallbacks() {
 //MC_PRE_PLAYER_POCKET_ITEM_SWAP(1287)
 bool __stdcall RunPrePlayerPocketItemSwapCallback(Entity_Player* player) {
 	const int callbackid = 1287;
-	
+
 	if (CallbackState.test(callbackid - 1000)) {
 		lua_State* L = g_LuaEngine->_state;
 		lua::LuaStackProtector protector(L);
@@ -1363,22 +1375,23 @@ void ASMPatchMainMenuCallback() {
 // so any code running on this callback at this time is very likely to crash the game.
 // Here we trigger MC_PRE_MOD_UNLOAD earlier in the shutdown process (after the game has saved, but
 // before stuff starts getting destroyed) as well as pass a boolean indicating the ongoing shutdown.
-// Separately we've also ensured that the default MC_PRE_UNLOAD_TRIGGER (_UnloadMod) does not run
+// Separately we've also ensured that the default MC_PRE_UNLOAD trigger (_UnloadMod) does not run
 // the callback during shutdown.
 void __stdcall RunPreModUnloadCallbacks() {
-	for (const ModReference& mod : g_Mods) {
-		const int callbackid = 73;  // MC_PRE_MOD_UNLOAD
+	const int callbackid = 73;  // MC_PRE_MOD_UNLOAD
+	if (VanillaCallbackState.test(callbackid)) {
+		for (const ModReference& mod : g_Mods) {
+			lua_State* L = g_LuaEngine->_state;
+			lua::LuaStackProtector protector(L);
 
-		lua_State* L = g_LuaEngine->_state;
-		lua::LuaStackProtector protector(L);
+			lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
 
-		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
-
-		lua::LuaCaller(L).push(callbackid)
-			.pushnil()
-			.pushluaref(mod._luaTableRef->_ref)
-			.push(true)
-			.call(1);
+			lua::LuaCaller(L).push(callbackid)
+				.pushnil()
+				.pushluaref(mod._luaTableRef->_ref)
+				.push(true)
+				.call(1);
+		}
 	}
 }
 void ASMPatchPreModUnloadCallbackDuringShutdown() {
@@ -1388,9 +1401,370 @@ void ASMPatchPreModUnloadCallbackDuringShutdown() {
 
 	printf("[REPENTOGON] Patching earlier MC_PRE_MOD_UNLOAD in Isaac::Shutdown at %p\n", addr);
 
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
-	patch.AddInternalCall(RunPreModUnloadCallbacks)
+	patch.PreserveRegisters(savedRegisters)
+		.AddInternalCall(RunPreModUnloadCallbacks)
+		.RestoreRegisters(savedRegisters)
 		.AddBytes(ByteBuffer().AddAny((char*)addr, 0x5))  // Restore the push we overwrote
 		.AddRelativeJump((char*)addr + 0x5);
 	sASMPatcher.PatchAt(addr, &patch);
+}
+
+void __stdcall RunPostRoomRenderEntitiesCallback() {
+	const int callbackid = 1044;
+	if (CallbackState.test(callbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+		lua::LuaCaller(L).push(callbackid)
+			.pushnil()
+			.call(1);
+	}
+}
+void ASMPatchPostRoomRenderEntitiesCallback() {
+	SigScan scanner("33f68d87????????39b0????????76??8bbd????????6690");
+	scanner.Scan();
+	void* addr = scanner.GetAddress();
+
+	printf("[REPENTOGON] Patching MC_POST_ROOM_RENDER_ENTITIES into Room::Render at %p\n", addr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.AddInternalCall(RunPostRoomRenderEntitiesCallback)
+		.RestoreRegisters(savedRegisters)
+		.AddBytes(ByteBuffer().AddAny((char*)addr, 0x8))  // Restore the bytes we overwrote
+		.AddRelativeJump((char*)addr + 0x8);
+	sASMPatcher.PatchAt(addr, &patch);
+}
+
+// MC_PRE_ITEM_TEXT_DISPLAY
+bool RunPreItemTextDisplayCallback(const char* title, const char* subtitle, bool isSticky, bool isCurseDisplay) {
+	const int callbackId = 1484;
+	if (CallbackState.test(callbackId - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+		lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+			.pushnil()
+			.push(title)
+			.push(subtitle)
+			.push(isSticky)
+			.push(isCurseDisplay)
+			.call(1);
+
+		if (!result && lua_isboolean(L, -1)) {
+			return (bool)lua_toboolean(L, -1);
+		}
+	}
+	return true;
+}
+bool RunPreItemTextDisplayCallbackUTF16(wchar_t* title, wchar_t* subtitle, bool isSticky, bool isCurseDisplay) {
+	int sizeNeededTitle = WideCharToMultiByte(CP_UTF8, 0, &title[0], wcslen(title), NULL, 0, NULL, NULL);
+	std::string strTitle(sizeNeededTitle, 0);
+	WideCharToMultiByte(CP_UTF8, 0, title, wcslen(title), &strTitle[0], sizeNeededTitle, NULL, NULL);
+
+	int sizeNeededSubtitle = WideCharToMultiByte(CP_UTF8, 0, &subtitle[0], wcslen(subtitle), NULL, 0, NULL, NULL);
+	std::string strSubtitle(sizeNeededSubtitle, 0);
+	WideCharToMultiByte(CP_UTF8, 0, subtitle, wcslen(subtitle), &strSubtitle[0], sizeNeededSubtitle, NULL, NULL);
+
+	return RunPreItemTextDisplayCallback(strTitle.c_str(), strSubtitle.c_str(), isSticky, isCurseDisplay);
+}
+
+// Only called for the stage name popup, and cards/pills/etc in co-op (as of Rep+ v1.9.7.10).
+// Seems to be some inlining involved in other cases.
+HOOK_METHOD(HUD_Message, Show, (const char* title, const char* subtitle, bool autoHide, bool isCurseDisplay) -> void) {
+	const bool isSticky = !autoHide;  // What was once the "isSticky" boolean now has the opposite meaning in REP+
+	if (RunPreItemTextDisplayCallback(title, subtitle, isSticky, isCurseDisplay)) {
+		super(title, subtitle, autoHide, isCurseDisplay);
+	}
+}
+
+// Called for custom lua text, transformations, and cards/pills outside of co-op.
+HOOK_METHOD(HUD, ShowStackedItemTextCustomUTF8, (char* title, char* subtitle, bool unused, bool isCurseDisplay) -> void) {
+	if (RunPreItemTextDisplayCallback(title, subtitle, false, isCurseDisplay)) {
+		super(title, subtitle, unused, isCurseDisplay);
+	}
+}
+
+// Called from HUD::ShowItemText outside co-op, and in Room::Init (for miniboss names?).
+HOOK_METHOD(HUD, ShowStackedItemTextCustomUTF16, (wchar_t* title, wchar_t* subtitle, bool unused1, bool unused2) -> void) {
+	if (RunPreItemTextDisplayCallbackUTF16(title, subtitle, false, false)) {
+		super(title, subtitle, unused1, unused2);
+	}
+}
+
+// Patch to trigger the callback for HUD::ShowItemText in co-op, as it seems to use some inlined code.
+bool __stdcall PreItemTextDisplayTrampoline(HUD_Message* message, wchar_t* title, wchar_t* subtitle) {
+	if (RunPreItemTextDisplayCallbackUTF16(title, subtitle, false, false)) {
+		message->text_out();  // Function call overridden by the patch.
+		return true;
+	}
+	return false;
+}
+void ASMPatchPreItemTextDisplayCallback() {
+	SigScan patchScanner("e8????????6a00ffb5????????8bcfe8????????85f6");
+	patchScanner.Scan();
+	void* patchAddr = patchScanner.GetAddress();
+
+	SigScan cancelScanner("ffb5????????e8????????83c40456");
+	if (!cancelScanner.Scan()) {
+		ZHL::Log("[ERROR] Unable to find signature for MC_PRE_ITEM_TEXT_DISPLAY patch's cancel jump\n");
+		return;
+	}
+	void* cancelAddr = cancelScanner.GetAddress();
+
+	printf("[REPENTOGON] Patching MC_PRE_ITEM_TEXT_DISPLAY into HUD::ShowItemText at %p\n", patchAddr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.Push(ASMPatch::Registers::ESI)  // (subtitle)
+		.AddBytes(ByteBuffer().AddAny((char*)patchAddr + 0x7, 0x6))  // PUSH dword ptr [EBP + ?] (title)
+		.Push(ASMPatch::Registers::ECX)  // HUD_Message
+		.AddInternalCall(PreItemTextDisplayTrampoline)
+		.AddBytes("\x84\xC0") // TEST AL, AL
+		.RestoreRegisters(savedRegisters)
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JZ, cancelAddr)  // Jump for false (cancel the text)
+		.AddRelativeJump((char*)patchAddr + 0x5);  // Jump for true (continue normally)
+	sASMPatcher.PatchAt(patchAddr, &patch);
+}
+
+static bool _hideActiveItemImage = false;
+static bool _hideActiveItemOutline = false;
+static bool _hideActiveItemChargeBar = false;
+
+static const ColorMod activeItemOutlineColor(0, 0, 0, 1, 1, 1, 1);
+
+HOOK_METHOD(PlayerHUDActiveItem, RenderGfx, (SourceQuad* source, DestinationQuad* dest, const ColorMod& color) -> void) {
+	if (_hideActiveItemImage) return;
+	if (_hideActiveItemOutline && color == activeItemOutlineColor) {
+		return;
+	}
+	super(source, dest, color);
+}
+
+bool __stdcall ShouldHideChargebar() {
+	return _hideActiveItemChargeBar;
+}
+
+// PRE/POST_PLAYERHUD_RENDER_ACTIVE_ITEM (1119/1079)
+HOOK_METHOD(PlayerHUD, RenderActiveItem, (unsigned int activeSlot, const Vector& pos, int playerHudLayout, float size, float alpha, bool unused) -> void) {
+	const bool isSchoolbagSlot = (activeSlot == 1);
+
+	// If the slot is ActiveSlot.SLOT_SECONDARY (schoolbag), halve the size/scale.
+	// The game does this inside RenderActiveItem.
+	// Size adjustments for pocket slots are already accounted for.
+	float actualSize = size;
+	if (isSchoolbagSlot) {
+		actualSize *= 0.5;
+	}
+
+	// The positions we send through the callback may be modified slightly to be more accurate to where the game actually rendered stuff.
+	Vector itemPos = pos;
+	Vector chargeBarPos = pos;
+
+	// Player 1's esau gets different charge bar offsets.
+	const bool playerOneEsau = this->_playerHudIndex == 4 && playerHudLayout == 1;
+
+	if (!playerOneEsau) {
+		chargeBarPos.x += (isSchoolbagSlot ? -2 : 34) * actualSize;
+	}
+	else if (isSchoolbagSlot) {
+		chargeBarPos.x += 38 * actualSize;
+	}
+	chargeBarPos.y += 17 * actualSize;
+
+	if (this->_activeItem[activeSlot].bookImage != nullptr) {
+		// A book sprite was rendered under the item (Book of Virtues or Judas' Birthright).
+		// Update the offsets we're sending through the callbacks to match where the corresponding sprites were actually rendered.
+		itemPos.y -= 4;
+		chargeBarPos.y += 3;
+	}
+
+	const int activeItemID = this->GetPlayer()->GetActiveItem(activeSlot);
+
+	const int precallbackid = 1119;
+	if (CallbackState.test(precallbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+		lua::LuaResults result = lua::LuaCaller(L).push(precallbackid)
+			.push(activeItemID)
+			.push(this->GetPlayer(), lua::Metatables::ENTITY_PLAYER)
+			.push(activeSlot)
+			.pushUserdataValue(itemPos, lua::Metatables::VECTOR)
+			.push(alpha)
+			.push(actualSize)
+			.pushUserdataValue(chargeBarPos, lua::Metatables::VECTOR)
+			.call(1);
+
+		if (!result) {
+			if (lua_isboolean(L, -1) && (bool)lua_toboolean(L, -1) == true) {
+				return;
+			} else if (lua_istable(L, -1)) {
+				lua_pushnil(L);
+				while (lua_next(L, -2) != 0) {
+					if (lua_isstring(L, -2)) {
+						const std::string key = lua_tostring(L, -2);
+						if (key == "HideItem" && lua_isboolean(L, -1)) {
+							_hideActiveItemImage = (bool)lua_toboolean(L, -1);
+						} else if (key == "HideOutline" && lua_isboolean(L, -1)) {
+							_hideActiveItemOutline = (bool)lua_toboolean(L, -1);
+						} else if (key == "HideChargeBar" && lua_isboolean(L, -1)) {
+							_hideActiveItemChargeBar = (bool)lua_toboolean(L, -1);
+						}
+					}
+					lua_pop(L, 1);
+				}
+			}
+		}
+	}
+
+	super(activeSlot, pos, playerHudLayout, size, alpha, unused);
+
+	_hideActiveItemImage = false;
+	_hideActiveItemOutline = false;
+	_hideActiveItemChargeBar = false;
+
+	const int postcallbackid = 1079;
+	if (CallbackState.test(postcallbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+		lua::LuaCaller(L).push(postcallbackid)
+			.push(activeItemID)
+			.push(this->GetPlayer(), lua::Metatables::ENTITY_PLAYER)
+			.push(activeSlot)
+			.pushUserdataValue(itemPos, lua::Metatables::VECTOR)
+			.push(alpha)
+			.push(actualSize)
+			.pushUserdataValue(chargeBarPos, lua::Metatables::VECTOR)
+			.call(1);
+	}
+}
+
+void ASMPatchHideChargeBar() {
+	SigScan scanner("8b55??85d20f8e????????8b4d");
+	scanner.Scan();
+	void* addr = scanner.GetAddress();
+
+	printf("[REPENTOGON] Patching PlayerHUD:RenderActiveItem for hiding charge bars at %p\n", addr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.AddBytes(ByteBuffer().AddAny((char*)addr, 0x3))  // mov EDX, dword ptr [EBP + ?] (active item max charge)
+		.AddBytes("\x31\xC9")  // xor ecx,ecx
+		.PreserveRegisters(savedRegisters)
+		.AddInternalCall(ShouldHideChargebar)
+		.AddBytes("\x84\xC0") // test al, al
+		.RestoreRegisters(savedRegisters)
+		.AddBytes("\x0F\x45\xD1")  // cmovnz edx,ecx
+		.AddBytes("\x85\xD2")  // test edx, edx
+		.AddRelativeJump((char*)addr + 0x5);
+	sASMPatcher.PatchAt(addr, &patch);
+}
+
+// MC_POST_BACKWARDS_ROOM_RESTORE (1308)
+static std::vector<int> s_BackwardsStageStack;
+
+static inline int calc_stage_from_backwards_stage(BackwardsStageDesc* backwardsStage)
+{
+	constexpr size_t structSize = sizeof(BackwardsStageDesc);
+
+	BackwardsStageDesc* backwardsStagesPtr = std::begin(g_Game->_backwardsStages);
+	assert(backwardsStagesPtr <= backwardsStage && backwardsStage <= std::end(g_Game->_backwardsStages)); // Check that the pointer is within the _backwardsStages array
+
+	size_t offset = (uintptr_t)(backwardsStage) - (uintptr_t)backwardsStagesPtr;
+	assert(offset % structSize == 0); // Check that the BackwardsStageDesc struct is alligned
+
+	int stage = offset / structSize;
+	return stage + 1; // backwards stages start from 1
+}
+
+HOOK_METHOD(Level, place_rooms_backwards, (LevelGenerator* levelGen, BackwardsStageDesc* backwardsStage, uint32_t stageId, uint32_t minDifficulty, uint32_t maxDifficulty) -> bool)
+{
+	int stage = calc_stage_from_backwards_stage(backwardsStage);
+	s_BackwardsStageStack.push_back(stage);
+	bool success = super(levelGen, backwardsStage, stageId, minDifficulty, maxDifficulty);
+	s_BackwardsStageStack.pop_back();
+	return success;
+}
+
+static inline void run_post_backwards_room_restore(int stage, RoomDescriptor& roomDesc, const char* key, int index)
+{
+	constexpr int callbackId = 1308;
+	if (!CallbackState.test(callbackId - 1000)) {
+		return;
+	}
+
+	lua_State* L = g_LuaEngine->_state;
+	lua::LuaStackProtector protector(L);
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+	lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+		.pushnil()
+		.push(stage)
+		.push(&roomDesc, lua::Metatables::ROOM_DESCRIPTOR)
+		.pushfstring("%s_%d", key, index)
+		.call(1);
+}
+
+static void __stdcall RunPostBackwardsBossRestore(int roomIndex)
+{
+	roomIndex++; // increase room index
+	int stage = s_BackwardsStageStack.back();
+	RoomDescriptor& roomDesc = g_Game->_gridRooms[g_Game->_nbRooms - 1];
+	run_post_backwards_room_restore(stage, roomDesc, "boss", roomIndex);
+}
+
+static void __stdcall RunPostBackwardsTreasureRestore(int roomIndex)
+{
+	int stage = s_BackwardsStageStack.back();
+	RoomDescriptor& roomDesc = g_Game->_gridRooms[g_Game->_nbRooms - 1];
+	run_post_backwards_room_restore(stage, roomDesc, "treasure", roomIndex);
+}
+
+static void patch_post_backwards_boss_restore(const char* signature, const char* location, const char* callbackName)
+{
+	void* address = get_sig_address(signature, location, callbackName);
+	ZHL::Log("[REPENTOGON] Patching %s at %p\n", location, address);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.Push(ASMPatch::Registers::ECX) // roomIndex (post decrease)
+		.AddInternalCall(RunPostBackwardsBossRestore)
+		.RestoreRegisters(savedRegisters)
+		.AddBytes(ByteBuffer().AddAny((char*)address, 0x6)) // restore
+		.AddRelativeJump((char*)address + 0x6); // resume
+	sASMPatcher.PatchAt(address, &patch);
+}
+
+static void patch_post_backwards_treasure_restore(const char* signature, const char* location, const char* callbackName)
+{
+	void* address = get_sig_address(signature, location, callbackName);
+	ZHL::Log("[REPENTOGON] Patching %s at %p\n", location, address);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.Push(ASMPatch::Registers::EAX) // roomIndex
+		.AddInternalCall(RunPostBackwardsTreasureRestore)
+		.RestoreRegisters(savedRegisters)
+		.AddBytes(ByteBuffer().AddAny((char*)address, 0x7)) // restore
+		.AddRelativeJump((char*)address + 0x7); // resume
+	sASMPatcher.PatchAt(address, &patch);
+}
+
+void ASMPatchPostBackwardsRoomRestore()
+{
+	patch_post_backwards_boss_restore("894d??8955??85c90f89", "Level::place_rooms_backwards (Post Boss Room Restore)", "MC_POST_BACKWARDS_ROOM_RESTORE");
+	patch_post_backwards_treasure_restore("4883ea0c", "Level::place_rooms_backwards (Post Treasure Room Restore)", "MC_POST_BACKWARDS_ROOM_RESTORE");
 }

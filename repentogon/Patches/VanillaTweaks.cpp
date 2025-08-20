@@ -14,8 +14,8 @@ HOOK_METHOD(RoomConfig, LoadStageBinary, (unsigned int Stage, unsigned int Mode)
 	super(Stage, Mode);
 }
 
-// Force achievements to be unlockable (expect outside of game mode)
-HOOK_METHOD(Manager, AchievementUnlocksDisallowed, (bool unk) -> bool) {
+// Force achievements to be unlockable (expect outside of game mode) [moved to ASMTweaks.cpp]
+/*HOOK_METHOD(Manager, AchievementUnlocksDisallowed, (bool unk) -> bool) {
 	ModManager* modman = g_Manager->GetModManager();
 	auto loadedMod = std::find_if(modman->_mods.begin(), modman->_mods.end(), [](ModEntry* mod) { return mod->_loaded; });
 
@@ -27,6 +27,7 @@ HOOK_METHOD(Manager, AchievementUnlocksDisallowed, (bool unk) -> bool) {
 
 	return false;
 }
+*/
 
 // I'm putting this here bc I don't want to burden REPENTOGONOptions.h with the whole hooking system
 HOOK_METHOD(OptionsConfig, Save, () -> void) {
@@ -123,9 +124,17 @@ HOOK_METHOD(Entity_Familiar, Init, (unsigned int type, unsigned int variant, uns
 	super(type, variant, subtype, initSeed);
 }
 
-// eco mode stuff begin
-
+// eco mode stuff 
+decltype(&SetProcessInformation) p_SetProcessInformation=0x0;
 void EcoMode_toggle_qos(bool eco_state) {
+	if (p_SetProcessInformation == 0x0) {
+		p_SetProcessInformation = (decltype(&SetProcessInformation))GetProcAddress(GetModuleHandle("kernel32"), "SetProcessInformation");
+		if (!p_SetProcessInformation) {
+			repentogonOptions.ecoMode = false;
+			repentogonOptions.Save();
+			return;
+		}
+	};
 	HANDLE cur_process = GetCurrentProcess();
 	PROCESS_POWER_THROTTLING_STATE PowerThrottling = { 0 };
 	PowerThrottling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
@@ -137,7 +146,8 @@ void EcoMode_toggle_qos(bool eco_state) {
 	else {
 		SetPriorityClass(cur_process, NORMAL_PRIORITY_CLASS);
 	};
-	SetProcessInformation(cur_process, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+//	SetProcessInformation(cur_process, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
+	p_SetProcessInformation(cur_process, ProcessPowerThrottling, &PowerThrottling, sizeof(PowerThrottling));
 };
 
 bool EcoMode_old_state = 0;
@@ -161,14 +171,23 @@ HOOK_METHOD(Manager, Render, (void)->void) {
 
 // eco mode stuff end
 
-//clearing kerning pairs from parsed font
-HOOK_METHOD(Font, Load, (const char* path, bool unusedIsLoading) -> void) {
-	super(path, unusedIsLoading);
+//prevents joining lobbies
+HOOK_METHOD(Menu_Game, UnknownJoinLobby, (int unk1, int unk2, int unk3) -> void) {
 
-	auto& kernPair = _kerningPairs;
+}
 
-	if (!kernPair.empty()) {
-		kernPair.clear();
+//Prints log message about redirected configs
+HOOK_METHOD(ModManager, TryRedirectPath, (std_string* result, std_string* filePath) -> void) {
+	super(result, filePath);
+
+	auto suffixRes = [](std::string s) {
+		if (s.rfind(".xml") != std::string::npos)
+			return true;
+		else
+			return false;
+	};
+
+	if (!result->empty() && result->compare(*filePath) != 0 && suffixRes(*result)) {
+		KAGE::_LogMessage(0, "[warn] Redirected .xml config %s\n", result->c_str());
 	}
-
 }

@@ -27,6 +27,8 @@ public:
 
     virtual std::any visitTypeInfoDef(ZHLParser::TypeInfoDefContext *context) = 0;
 
+    virtual std::any visitAsmDef(ZHLParser::AsmDefContext *context) = 0;
+
     virtual std::any visitFunction(ZHLParser::FunctionContext *context) = 0;
 
     virtual std::any visitReference(ZHLParser::ReferenceContext *context) = 0;

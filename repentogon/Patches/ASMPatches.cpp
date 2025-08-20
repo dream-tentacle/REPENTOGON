@@ -2,17 +2,22 @@
 #include "ASMPatches.h"
 
 #include "../LuaInterfaces/LuaRender.h"
+#include "../SaveSyncing/SaveSyncing.h"
+
 #include "NullItemsAndCostumes.h"
 #include "CustomCache.h"
 #include "FamiliarTags.h"
 #include "PlayerTags.h"
 #include "GetCoinValue.h"
+#include "PlayerFeatures.h"
 #include "PocketItems.h"
 #include "Anm2Extras.h"
 #include "ExtraLives.h"
 #include "EntityPlus.h"
 #include "ItemPoolManager.h"
 #include "CardsExtras.h"
+#include "EvaluateStats.h"
+#include "XMLPlayerExtras.h"
 
 #include "ASMPatches/ASMCallbacks.h"
 #include "ASMPatches/ASMDelirium.h"
@@ -29,6 +34,7 @@
 #include "ASMPatches/ASMTweaks.h"
 #include "ASMPatches/ASMTweaks.h"
 #include "ASMPatches/ASMFixes.h"
+#include "ASMPatches/ASMSplitTears.h"
 
 #include "ASMPatcher.hpp"
 
@@ -80,6 +86,7 @@ void ASMPatchConsoleRunCommand() {
 }
 
 void PerformASMPatches() {
+	SaveSyncing::ASMPatchesForSaveSyncing();
 	ASMPatchLogMessage();
 	ASMPatchConsoleRunCommand();
 
@@ -108,6 +115,11 @@ void PerformASMPatches() {
 	ASMPatchPrePlayerPocketItemSwap();
 	ASMPatchMainMenuCallback();
 	ASMPatchPreModUnloadCallbackDuringShutdown();
+	ASMPatchPostRoomRenderEntitiesCallback();
+	ASMPatchPreItemTextDisplayCallback();
+	ASMPatchHideChargeBar();
+	ASMPatchPostBackwardsRoomRestore();
+	SplitTears::ASMPatchesForSplitTearCallback();
 
 	// Delirium
 	delirium::AddTransformationCallback();
@@ -135,6 +147,7 @@ void PerformASMPatches() {
 	ASMPatchModsMenu();
 	ASMPatchMenuOptionsLanguageChange();
 	ASMPatchOnlineMenu();
+	PatchModdedCharacterHiddenByAchievementInMenu();
 
 	// Room
 	ASMPatchAmbushWaveCount();
@@ -151,6 +164,9 @@ void PerformASMPatches() {
 	ASMPatchesForExtraLives();
 	ASMPatchMarsDoubleTapWindow();
 	ASMPatchAddActiveCharge();
+	EvaluateStats::ApplyASMPatches();
+	PatchGetGreedDonationBreakChanceForModdedCharacters();
+	PatchIncreaseGreedDonationCoinCountForModdedCharacters();
 
 	// Status Effects
 	PatchInlinedGetStatusEffectTarget();
@@ -193,9 +209,11 @@ void PerformASMPatches() {
 		ZHL::Log("[ERROR] Error while applying an archive checksum skip\n");
 	};
 
-	if (!ASMPatches::LeaderboarEntryCheckerUpdate()) {
+	//patch disabled, due to bugged steam details
+	/*if (!ASMPatches::LeaderboarEntryCheckerUpdate()) {
 		ZHL::Log("[ERROR] Error while applying the leaderboard entry checker\n");
 	};
+	*/
 
 //	the patch is disabled because it does not do the actual heavylifting and results in a desync ;p
 //
@@ -209,4 +227,11 @@ void PerformASMPatches() {
 
 	ASMPatches::NativeRepentogonResources();
 	ASMPatches::PatchGotInvaldParameterReadingChallengesXml();
+
+	if (!ASMPatches::SkipWombAchievementBlock()) {
+		ZHL::Log("[ERROR] Error while skipping womb achievement block\n");
+	}
+
+	ASMPatches::DisableExitPrompt();
+	ASMPatches::PatchLeaderboardGoalSprite();
 }

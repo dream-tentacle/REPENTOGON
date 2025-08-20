@@ -70,12 +70,16 @@ HOOK_METHOD(Entity_Player, AddCollectible, (int type, int charge, bool firsttime
 			.call(1);
 
 		if (!res) {
-			if (lua_istable(L, -1)) { // 6 params 
-				int* result = new int[5];
+			if (lua_istable(L, -1)) {
+				int result[5] = { type, charge, firsttime, slot, vardata };
 				for (int i = 1; i <= 5; i++) {
 					lua_pushinteger(L, i);
 					lua_gettable(L, -2);
-					result[i - 1] = (int)lua_tointeger(L, -1); //I only need ints here, otherwise I'd need to check the type
+					if (i == 3 && lua_isboolean(L, -1)) {  // I   need to check the type
+						result[i - 1] = lua_toboolean(L, -1);
+					} else if (i != 3 && lua_isinteger(L, -1)) {
+						result[i - 1] = (int)lua_tointeger(L, -1);
+					}
 					lua_pop(L, 1);
 				}
 				super(result[0], result[1], result[2], result[3], result[4], unk);
@@ -614,13 +618,22 @@ HOOK_METHOD(Entity_Player, AddMaxHearts, (int amount, bool ignoreKeeper) -> void
 }
 
 HOOK_METHOD(Entity_Player, AddSoulHearts, (int amount, bool unk) -> void) {	//soul hp
-	if (!CallbackState.test(1009 - 1000)) {
-		super(amount, unk);
+	if (CallbackState.test(1009 - 1000)) {
+		std::optional<int> heartcount = PreAddHeartsCallbacks(this, amount, 1 << 2, std::nullopt);
+		amount = heartcount.value_or(amount);
 	}
 
-	else {
-		std::optional<int> heartcount = PreAddHeartsCallbacks(this, amount, 1<<2 ,std::nullopt);
-		amount = heartcount.value_or(amount);
+	// Failsafe for the possibility of the forgotten having soul hearts, which is not supposed to happen since AddSoulHearts redirects to The Soul.
+	// In this situation the soul hearts on The Forgotten would be impossible to remove for the same reason.
+	// This was previously only known to happen via the Revive function, which was fixed, but still putting a failsafe here just in case.
+	// Allow "illegal" soul hearts to be removed from the forgotten if they happen to exist. Ideally this should never happen.
+	if (this->GetPlayerType() == PLAYER_THEFORGOTTEN && amount < 0 && this->_soulHearts > 0) {
+		int illegalSoulHearts = this->_soulHearts;
+		this->_soulHearts = 0;
+		if (amount < -illegalSoulHearts) {
+			super(amount + illegalSoulHearts, unk);
+		}
+	} else {
 		super(amount, unk);
 	}
 
@@ -1023,7 +1036,7 @@ HOOK_METHOD(Room, ShopRestockPartial, () -> void) {
 	}
 }
 
-//PRE_LEVEL_CHANGE_ROOM (id :1061)
+//PRE_CHANGE_ROOM (id :1061)
 HOOK_METHOD(Level, ChangeRoom, (int roomId, int dimension) -> void) {
 	const int callbackid = 1061;
 	if (!CallbackState.test(callbackid - 1000)) { return super(roomId, dimension); }
@@ -1041,7 +1054,20 @@ HOOK_METHOD(Level, ChangeRoom, (int roomId, int dimension) -> void) {
 	if (!result) {
 		if (lua_istable(L, -1)) {
 			if (lua_rawlen(L, -1) == 2) {
-				super(lua::callbacks::ToInteger(L, 1), lua::callbacks::ToInteger(L, 2));
+				const int changedRoomId = lua::callbacks::ToInteger(L, 1);
+				const int changedDimension = lua::callbacks::ToInteger(L, 2);
+
+				RoomDescriptor* roomDesc = GetRoomByIdx(changedRoomId, changedDimension);
+				
+				if (!roomDesc || !roomDesc->Data) {
+					logViewer.AddLog(LogViewer::Game, "MC_PRE_CHANGE_ROOM: Tried to switch to room with Idx %d and dimension %d, but it doesn't exist\n", changedRoomId, changedDimension);
+					super(roomId, dimension);
+				}
+				else {
+					g_Game->_leaveDoor = -1;
+					super(changedRoomId, changedDimension);
+				}
+				
 			}
 		}
 		else {
@@ -1529,17 +1555,13 @@ HOOK_METHOD(Entity_Player, GetHealthType, () -> int) {
 
 			lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
 
-			lua::LuaResults result = lua::LuaCaller(L).push(callbackid)
+			lua::LuaCaller(L).push(callbackid)
 				.push(this->GetPlayerType())
 				.push(this, lua::Metatables::ENTITY_PLAYER)
 				.push(healthType)
 				.push(previousHealthType)
 				.push(defaultHealthType)
 				.call(1);
-
-			if (!result && lua_isboolean(L, -1)) {
-				convertHeartContainers = (bool)lua_toboolean(L, -1);
-			}
 		}
 
 		if (healthType == 1) {  // Soul
@@ -2633,87 +2655,21 @@ HOOK_STATIC(Manager, RecordPlayerCompletion, (int completion) -> void, __stdcall
 	}
 }
 
-// PRE/POST_PLAYERHUD_RENDER_ACTIVE_ITEM (1119/1079)
-HOOK_METHOD(PlayerHUD, RenderActiveItem, (unsigned int activeSlot, const Vector &pos, int playerHudLayout, float size, float alpha, bool unused) -> void) {
-	const bool isSchoolbagSlot = (activeSlot == 1);
-
-	// If the slot is ActiveSlot.SLOT_SECONDARY (schoolbag), halve the size/scale.
-	// The game does this inside RenderActiveItem.
-	// Size adjustments for pocket slots are already accounted for.
-	float actualSize = size;
-	if (isSchoolbagSlot) {
-		actualSize *= 0.5;
-	}
-
-	// The positions we send through the callback may be modified slightly to be more accurate to where the game actually rendered stuff.
-	Vector itemPos = pos;
-	Vector chargeBarPos = pos;
-
-	// Player 1's esau gets different charge bar offsets.
-	const bool playerOneEsau = this->_playerHudIndex == 4 && playerHudLayout == 1;
-
-	if (!playerOneEsau) {
-		chargeBarPos.x += (isSchoolbagSlot ? -2 : 34) * actualSize;
-	} else if (isSchoolbagSlot) {
-		chargeBarPos.x += 38 * actualSize;
-	}
-	chargeBarPos.y += 17 * actualSize;
-
-	if (this->_activeItem[activeSlot].bookImage != nullptr) {
-		// A book sprite was rendered under the item (Book of Virtues or Judas' Birthright).
-		// Update the offsets we're sending through the callbacks to match where the corresponding sprites were actually rendered.
-		itemPos.y -= 4;
-		chargeBarPos.y += 3;
-	}
-	
-	const int precallbackid = 1119;
-	if (CallbackState.test(precallbackid - 1000)) {
-		lua_State* L = g_LuaEngine->_state;
-		lua::LuaStackProtector protector(L);
-
-		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
-		lua::LuaResults result = lua::LuaCaller(L).push(precallbackid)
-			.pushnil()
-			.push(this->GetPlayer(), lua::Metatables::ENTITY_PLAYER)
-			.push(activeSlot)
-			.pushUserdataValue(itemPos, lua::Metatables::VECTOR)
-			.push(alpha)
-			.push(actualSize)
-			.pushUserdataValue(chargeBarPos, lua::Metatables::VECTOR)
-			.call(1);
-
-		if (!result && lua_isboolean(L, -1) && (bool)lua_toboolean(L, -1) == true) {
-			return;
-		}
-	}
-
-	super(activeSlot, pos, playerHudLayout, size, alpha, unused);
-
-	const int postcallbackid = 1079;
-	if (CallbackState.test(postcallbackid - 1000)) {
-		lua_State* L = g_LuaEngine->_state;
-		lua::LuaStackProtector protector(L);
-
-		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
-		lua::LuaCaller(L).push(postcallbackid)
-			.pushnil()
-			.push(this->GetPlayer(), lua::Metatables::ENTITY_PLAYER)
-			.push(activeSlot)
-			.pushUserdataValue(itemPos, lua::Metatables::VECTOR)
-			.push(alpha)
-			.push(actualSize)
-			.pushUserdataValue(chargeBarPos, lua::Metatables::VECTOR)
-			.call(1);
-	}
-}
+// PRE/POST_RENDER_ACTIVE_ITEM moved to ASMCallbacks
 
 //PRE/POST_PLAYERHUD_RENDER_HEARTS (1118/1091)
 HOOK_METHOD(PlayerHUD, RenderHearts, (Vector* unk, ANM2* sprite, int playerHudLayout, float scale, Vector pos) -> void) {
 	lua_State* L = g_LuaEngine->_state;
 
+	Vector posToSend = pos;
+
+	// Fix the render position sent to the callback for the compact esau layout.
+	if (this->_playerHudIndex > 3 && playerHudLayout == 3) {
+		posToSend.y += 34;
+	}
+
 	const int callbackid1 = 1118;
 	if (CallbackState.test(callbackid1 - 1000)) {
-
 		lua::LuaStackProtector protector(L);
 
 		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
@@ -2722,7 +2678,7 @@ HOOK_METHOD(PlayerHUD, RenderHearts, (Vector* unk, ANM2* sprite, int playerHudLa
 			.pushnil()
 			.push(unk, lua::Metatables::VECTOR)
 			.push(sprite, lua::Metatables::SPRITE)
-			.pushUserdataValue(pos, lua::Metatables::VECTOR)
+			.pushUserdataValue(posToSend, lua::Metatables::VECTOR)
 			.push(scale)
 			.push(_player, lua::Metatables::ENTITY_PLAYER)
 			.call(1);
@@ -2742,11 +2698,12 @@ HOOK_METHOD(PlayerHUD, RenderHearts, (Vector* unk, ANM2* sprite, int playerHudLa
 		lua::LuaStackProtector protector(L);
 
 		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
 		lua::LuaCaller(L).push(callbackid2)
 			.pushnil()
 			.push(unk, lua::Metatables::VECTOR)
 			.push(sprite, lua::Metatables::SPRITE)
-			.pushUserdataValue(pos, lua::Metatables::VECTOR)
+			.pushUserdataValue(posToSend, lua::Metatables::VECTOR)
 			.push(scale)
 			.push(_player, lua::Metatables::ENTITY_PLAYER)
 			.call(1);
@@ -2767,7 +2724,7 @@ HOOK_METHOD(Room, GetLightingAlpha, () -> float) {
 			.push(originalAlpha)
 			.call(1);
 
-		if (!result) {
+		if (!result && lua_isnumber(L,-1)) {
 			return (float)lua_tonumber(L, -1);
 		}
 	}
@@ -3417,14 +3374,20 @@ HOOK_METHOD(Level, place_room, (LevelGenerator_Room* slot, RoomConfig_Room* conf
 		lua::LuaStackProtector protector(L);
 
 		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
 		lua::LuaCaller caller(L);
-		LuaLevelGeneratorRoom* room = caller.push(callbackid).pushnil().pushUd<LuaLevelGeneratorRoom>(lua::metatables::LevelGeneratorRoomMT);
+		caller.push(callbackid).pushnil();
+		LuaLevelGeneratorRoom* room = caller.pushUd<LuaLevelGeneratorRoom>(lua::metatables::LevelGeneratorRoomMT);
+
 		room->cleanup = false;
 		room->context = nullptr;
 		room->room = slot;
-		
+
 		RoomConfig_Room* other = nullptr;
-		lua::LuaResults results = caller.push(config, lua::Metatables::ROOM_CONFIG_ROOM).push(seed).call(1);
+		lua::LuaResults result = caller.push(config, lua::Metatables::ROOM_CONFIG_ROOM)
+			.push(seed)
+			.call(1);
+
 		if (lua_isuserdata(L, -1)) {
 			auto opt = lua::TestUserdata<RoomConfig_Room*>(L, -1, lua::Metatables::ROOM_CONFIG_ROOM);
 
@@ -3449,7 +3412,7 @@ HOOK_METHOD(Level, place_room, (LevelGenerator_Room* slot, RoomConfig_Room* conf
 					ok = false;
 				}
 			}
-			
+
 			if (ok) {
 				return super(slot, other, seed, unk);
 			}
@@ -3458,44 +3421,54 @@ HOOK_METHOD(Level, place_room, (LevelGenerator_Room* slot, RoomConfig_Room* conf
 	return super(slot, config, seed, unk);
 }
 
-//MC_POST_PLAYER_GET_MULTI_SHOT_PARAMS (1251)
-static bool isMultiShotParamsEvaluating = false;
+// Prevent infinite loops in MC_EVALUATE_MULTI_SHOT_PARAMS
+// If GetMultiShotParams is called while the callback is running for that player/weaponType already,
+// skip the callback and return a vanilla MultiShotParams.
+// (player index -> weapontype)
+static std::unordered_map<int, std::set<int>> _getMultiShotParamsRecursionProtection;
+
+// MC_EVALUATE_MULTI_SHOT_PARAMS (1289)
+// Formerly MC_POST_PLAYER_GET_MULTI_SHOT_PARAMS (1251)
 HOOK_METHOD(Entity_Player, GetMultiShotParams, (Weapon_MultiShotParams* params, int weaponType) -> Weapon_MultiShotParams*) {
-	if (isMultiShotParamsEvaluating) // Prevent infinite loop when number of shots was altered
-	{
-		return super(params, weaponType);
-	}
+	std::set<int>* recursionProtection = &_getMultiShotParamsRecursionProtection[this->_playerIndex];
 
 	params = super(params, weaponType);
 
-	isMultiShotParamsEvaluating = true;
-	const int callbackid = 1251;
+	if (recursionProtection->find(weaponType) != recursionProtection->end()) {
+		return params;
+	}
 
-	if (CallbackState.test(callbackid - 1000)) {
+	recursionProtection->insert(weaponType);
+
+	const int legacycallbackid = 1251;
+	const int callbackid = 1289;
+	if (CallbackState.test(callbackid - 1000) || CallbackState.test(legacycallbackid - 1000)) {
 		lua_State* L = g_LuaEngine->_state;
 		lua::LuaStackProtector protector(L);
 
 		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
 
-		Entity_Player* ent = (Entity_Player*)this;
-
-		lua::LuaResults results = lua::LuaCaller(L).push(callbackid)
+		lua::LuaCaller caller(L);
+		caller.push(callbackid)
 			.push(this->GetPlayerType())
-			.push(ent, lua::Metatables::ENTITY_PLAYER)
-			.call(1);
+			.push(this, lua::Metatables::ENTITY_PLAYER);
+		Weapon_MultiShotParams* luaParams = caller.pushUd<Weapon_MultiShotParams>(lua::metatables::MultiShotParamsMT);
+		*luaParams = *params;
+		lua::LuaResults results = caller.push(weaponType).call(1);
 
-		if (lua_isuserdata(L, -1)) {
-			auto opt = lua::GetRawUserdata<Weapon_MultiShotParams*>(L, -1, lua::metatables::MultiShotParamsMT);
+		if (!results && lua_isuserdata(L, -1)) {
+			auto* ud = lua::GetRawUserdata<Weapon_MultiShotParams*>(L, -1, lua::metatables::MultiShotParamsMT);
 
-			if (!opt) {
-				KAGE::LogMessage(2, "Invalid userdata returned in MC_POST_GET_MULTI_SHOT_PARAMS");
-			}
-			else {
-				*params = *opt;
+			if (!ud) {
+				KAGE::LogMessage(2, "Invalid userdata returned in MC_EVALUATE_MULTI_SHOT_PARAMS!");
+			} else {
+				*params = *ud;
 			}
 		}
 	}
-	isMultiShotParamsEvaluating = false;
+
+	recursionProtection->erase(weaponType);
+
 	return params;
 }
 
@@ -4224,26 +4197,40 @@ HOOK_METHOD(Room, TriggerEffectRemoved, (ItemConfig_Item* item, int unused) -> v
 
 //MC_PRE/POST_PLAYER_REVIVE (1482)
 HOOK_METHOD(Entity_Player, Revive, () -> void) {
-		const int precallbackid = 1481;
-		if (CallbackState.test(precallbackid - 1000)) {
-			lua_State* L = g_LuaEngine->_state;
-			lua::LuaStackProtector protector(L);
+	const int precallbackid = 1481;
+	if (CallbackState.test(precallbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
 
-			lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
 
-			Entity_Player* ent = (Entity_Player*)this;
+		Entity_Player* ent = (Entity_Player*)this;
 
-			lua::LuaResults lua_result = lua::LuaCaller(L).push(precallbackid)
-				.push(this->GetPlayerType())
-				.push(ent, lua::Metatables::ENTITY_PLAYER)
-				.call(1);
+		lua::LuaResults lua_result = lua::LuaCaller(L).push(precallbackid)
+			.push(this->GetPlayerType())
+			.push(ent, lua::Metatables::ENTITY_PLAYER)
+			.call(1);
 
-			if (!lua_result && lua_isboolean(L, -1) && lua_toboolean(L, -1) == false) {
-				return;
-			}
+		if (!lua_result && lua_isboolean(L, -1) && lua_toboolean(L, -1) == false) {
+			return;
 		}
+	}
 
 	super();
+
+	if (this->GetPlayerType() == PLAYER_THEFORGOTTEN) {
+		// This function can leave the forgotten with half a soul heart, despite
+		// it normally being impossible for the forgotten to have soul hearts.
+		// (For vanilla revives the health is changed after Revive is called.)
+		// This results in the half soul heart being impossible to remove, as
+		// AddSoulHearts always redirects to The Soul.
+		// Fix the forgotten's health here to revive them with an empty bone heart.
+		this->_soulHearts = 0;
+		if (this->_boneHearts < 1) {
+			this->_boneHearts = 1;
+			this->_boneHeartsMask = 1;
+		}
+	}
 
 	const int postcallbackid = 1482;
 	if (CallbackState.test(postcallbackid - 1000)) {
@@ -4285,45 +4272,6 @@ HOOK_METHOD(HUD, ShowFortuneText, (int** param_1) -> void) {
 
 	super(param_1);
 }
-
-// MC_PRE_ITEM_TEXT_DISPLAY (1484) //prev: ShowItemTextCustom buw ShowItemTextCustom should work?
-/*HOOK_METHOD(HUD, ShowItemText, (wchar_t* title, wchar_t* subtitle, bool isSticky, bool isCurseDisplay) -> void) {
-	const int callbackId = 1484;
-	if (CallbackState.test(callbackId - 1000)) {
-		lua_State* L = g_LuaEngine->_state;
-		lua::LuaStackProtector protector(L);
-
-		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
-
-		int sizeNeededTitle = WideCharToMultiByte(CP_UTF8, 0, &title[0], wcslen(title), NULL, 0, NULL, NULL);
-		std::string strTitle(sizeNeededTitle, 0);
-		WideCharToMultiByte(CP_UTF8, 0, title, wcslen(title), &strTitle[0], sizeNeededTitle, NULL, NULL);
-		 
-		int sizeNeededSubtitle = WideCharToMultiByte(CP_UTF8, 0, &subtitle[0], wcslen(subtitle), NULL, 0, NULL, NULL);
-		std::string strSubtitle(sizeNeededSubtitle, 0);
-		WideCharToMultiByte(CP_UTF8, 0, subtitle, wcslen(subtitle), &strSubtitle[0], sizeNeededSubtitle, NULL, NULL);
-
-		lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
-			.pushnil()
-			.push(strTitle.c_str())
-			.push(strSubtitle.c_str())
-			.push(isSticky)
-			.push(isCurseDisplay)
-			.call(1);
-		 
-		if (!result) {
-			if (lua_isboolean(L, -1)) {
-				if (!lua_toboolean(L, -1)) {
-					return;
-				}
-			} 
-		} 
-	}
-
-	super(title, subtitle, isSticky, isCurseDisplay);
-}
-*/
-
 
 //MC_POST_BOSS_INTRO_SHOW (1270)
 HOOK_METHOD(RoomTransition, StartBossIntro, (unsigned int bossID1, unsigned int bossID2) -> void) {
@@ -4479,7 +4427,7 @@ HOOK_METHOD(ItemPool, ForceAddPillEffect, (int32_t ID)->int) {
 	return ret;
 };
 
-inline int GetGlowingHourglassSlot(GameState* gameState) { //g_Game->_currentGlowingHourglassSlot should always contain the slot that is currently being saved/restored, but I'm doing this just to be safe.
+static int get_glowing_hourglass_slot(GameState* gameState) { //g_Game->_currentGlowingHourglassSlot should always contain the slot that is currently being saved/restored, but I'm doing this just to be safe.
 	if (gameState == &g_Game->_glowingHourglassStates[0]._gameState) {
 		return 0;
 	}
@@ -4493,7 +4441,7 @@ inline int GetGlowingHourglassSlot(GameState* gameState) { //g_Game->_currentGlo
 
 //PRE/POST_GLOWING_HOURGLASS_SAVE (1300 - 1302)
 HOOK_METHOD(Game, SaveState, (GameState* gameState) -> void) {
-	int currentSlot = GetGlowingHourglassSlot(gameState);
+	int currentSlot = get_glowing_hourglass_slot(gameState);
 
 	const int preCallbackId = 1302;
 	if (CallbackState.test(preCallbackId - 1000)) {
@@ -4531,7 +4479,7 @@ HOOK_METHOD(Game, SaveState, (GameState* gameState) -> void) {
 
 //PRE/POST_GLOWING_HOURGLASS_LOAD (1301 - 1303)
 HOOK_METHOD(Game, RestoreState, (GameState* gameState, bool startGame) -> void) {
-	int currentSlot = GetGlowingHourglassSlot(gameState);
+	int currentSlot = get_glowing_hourglass_slot(gameState);
 
 	if (currentSlot != -1)
 	{
@@ -4568,6 +4516,126 @@ HOOK_METHOD(Game, RestoreState, (GameState* gameState, bool startGame) -> void) 
 			.call(1);
 	}
 	return;
+}
+
+// POST_ROOM_SAVE_STATE (1304)
+HOOK_METHOD(Room, SaveState, () -> void) {
+	super();
+	constexpr int callbackId = 1304;
+	if (!CallbackState.test(callbackId - 1000)) {
+		return;
+	}
+
+	lua_State* L = g_LuaEngine->_state;
+	lua::LuaStackProtector protector(L);
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+	lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+		.pushnil()
+		.push(this, lua::Metatables::ROOM)
+		.push(this->_descriptor, lua::Metatables::ROOM_DESCRIPTOR)
+		.call(1);
+}
+
+static inline void run_pre_room_restore(Room* room)
+{
+	constexpr int callbackId = 1305;
+	if (!CallbackState.test(callbackId - 1000)) {
+		return;
+	}
+
+	// The original method sets this before everything else so we emulate the same behavior to avoid inconsistencies
+	Entity_Pickup::BeginIgnoreModifiers();
+
+	lua_State* L = g_LuaEngine->_state;
+	lua::LuaStackProtector protector(L);
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+	lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+		.pushnil()
+		.push(room, lua::Metatables::ROOM)
+		.push(room->_descriptor, lua::Metatables::ROOM_DESCRIPTOR)
+		.call(1);
+
+	Entity_Pickup::EndIgnoreModifiers();
+}
+
+// PRE_ROOM_RESTORE_STATE (1305)
+HOOK_METHOD(Room, RestoreState, () -> void) {
+	run_pre_room_restore(this);
+	super();
+}
+
+// POST_SWAP_ROOMS (1306)
+HOOK_METHOD(Level, swap_rooms, (int leftIdx, int rightIdx) -> void)
+{
+	super(leftIdx, rightIdx);
+
+	constexpr int callbackId = 1306;
+	if (!CallbackState.test(callbackId - 1000)) {
+		return;
+	}
+
+	lua_State* L = g_LuaEngine->_state;
+	lua::LuaStackProtector protector(L);
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+	auto* left = this->GetRoomByIdx(leftIdx, DIMENSION_CURRENT);
+	auto* right = this->GetRoomByIdx(rightIdx, DIMENSION_CURRENT);
+
+	lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+		.pushnil()
+		.push(left, lua::Metatables::ROOM_DESCRIPTOR)
+		.push(right, lua::Metatables::ROOM_DESCRIPTOR)
+		.call(1);
+}
+
+static inline void run_post_backwards_room_save(lua_State* L, int stage, RoomDescriptor& roomDesc, const char* key, int index)
+{
+	constexpr int callbackId = 1307;
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+	lua::LuaResults result = lua::LuaCaller(L).push(callbackId)
+		.pushnil()
+		.push(stage)
+		.push(&roomDesc, lua::Metatables::ROOM_DESCRIPTOR)
+		.pushfstring("%s_%d", key, index)
+		.call(1);
+}
+
+// POST_BACKWARDS_ROOM_SAVE (1307)
+HOOK_METHOD(Game, SaveBackwardsStage, (int stage) -> void)
+{
+	super(stage);
+	constexpr int callbackId = 1307;
+	if (!CallbackState.test(callbackId - 1000)) {
+		return;
+	}
+
+	BackwardsStageDesc& backwardsStage = g_Game->_backwardsStages[stage - 1];
+	lua_State* L = g_LuaEngine->_state;
+	lua::LuaStackProtector protector(L);
+
+	for (size_t i = 0; i < backwardsStage._bossRoomsCount; i++)
+	{
+		assert(i < 2); // Game doesn't save more than two rooms currently, either game logic changed or the structure is misaligned
+		RoomDescriptor& savedRoomDesc = backwardsStage._bossRooms[i];
+		RoomDescriptor& roomDesc = g_Game->_gridRooms[savedRoomDesc.ListIndex];
+		assert(roomDesc.ListIndex == savedRoomDesc.ListIndex);
+		run_post_backwards_room_save(L, stage, roomDesc, "boss", i);
+	}
+
+	for (size_t i = 0; i < backwardsStage._treasureRoomsCount; i++)
+	{
+		assert(i < 2); // Game doesn't save more than two rooms currently, either game logic changed or the structure is misaligned
+		RoomDescriptor& savedRoomDesc = backwardsStage._treasureRooms[i];
+		RoomDescriptor& roomDesc = g_Game->_gridRooms[savedRoomDesc.ListIndex];
+		assert(roomDesc.ListIndex == savedRoomDesc.ListIndex);
+		run_post_backwards_room_save(L, stage, roomDesc, "treasure", i);
+	}
 }
 
 //PRE/POST_ENTITY_SET_COLOR (1486/1487)
@@ -4881,6 +4949,13 @@ HOOK_METHOD(Entity, _method, (const EntityRef& ref, int duration, bool ignoreBos
 	HandleStatusApplyCallback(statusId, inputs, _APPLY_STATUS_EFFECT_LAMBDA()); \
 }
 
+#define _APPLY_TWOBOOL_STATUS_EFFECT_LAMBDA() [this, otherbool](const EntityRef& ref, int duration, bool ignoreBossStatusCooldown) { return super(ref, duration, ignoreBossStatusCooldown, otherbool); }
+#define HOOK_TWOBOOL_STATUS_APPLY_CALLBACKS(_method, statusId) \
+HOOK_METHOD(Entity, _method, (const EntityRef& ref, int duration, bool ignoreBossStatusCooldown, bool otherbool) -> void) { \
+	StatusEffectApplyInputs inputs = {this, ref, duration, ignoreBossStatusCooldown}; \
+	HandleStatusApplyCallback(statusId, inputs, _APPLY_TWOBOOL_STATUS_EFFECT_LAMBDA()); \
+}
+
 #define _APPLY_NOBOOL_STATUS_EFFECT_LAMBDA() [this](const EntityRef& ref, int duration, bool ignoreBossStatusCooldown) { return super(ref, duration); }
 #define HOOK_NOBOOL_STATUS_APPLY_CALLBACKS(_method, statusId) \
 HOOK_METHOD(Entity, _method, (const EntityRef& ref, int duration) -> void) { \
@@ -4965,12 +5040,14 @@ HOOK_METHOD(Entity, _method, (const EntityRef& ref, int duration, float damage, 
 }
 
 // As of rep+, these all take a "ignoreBossStatusCooldown" boolean.
-HOOK_STATUS_APPLY_CALLBACKS(AddCharmed, 4);
 HOOK_STATUS_APPLY_CALLBACKS(AddConfusion, 5);
 HOOK_STATUS_APPLY_CALLBACKS(AddFear, 6);
 HOOK_STATUS_APPLY_CALLBACKS(AddFreeze, 7);
 HOOK_STATUS_APPLY_CALLBACKS(AddMidasFreeze, 11);
-HOOK_STATUS_APPLY_CALLBACKS(AddShrink, 13);
+
+// AddCharmed and AddShrink got new boolean params in 1.9.7.11
+HOOK_TWOBOOL_STATUS_APPLY_CALLBACKS(AddCharmed, 4);
+HOOK_TWOBOOL_STATUS_APPLY_CALLBACKS(AddShrink, 13);
 
 // These ones take a boolean parameter but it is unused.
 HOOK_STATUS_APPLY_CALLBACKS(AddBaited, 0);
@@ -5120,4 +5197,94 @@ HOOK_METHOD(Entity, AddSlowing, (const EntityRef& ref, int duration, float amoun
 			.push(ignoreBossStatusCooldown)
 			.call(1);
 	}
+}
+
+//POST_START_AMBUSH_WAVE (1488)
+void ProcessPostStartAmbushWaveCallback(bool bossAmbush) {
+	const int callbackid = 1488;
+	if (CallbackState.test(callbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+		lua::LuaResults result = lua::LuaCaller(L).push(callbackid)
+			.pushnil()
+			.push(bossAmbush)
+			.call(1);
+	}
+}
+
+HOOK_METHOD(Ambush, SpawnWave, () -> void) {
+	super();
+	ProcessPostStartAmbushWaveCallback(false);
+}
+
+HOOK_METHOD(Ambush, SpawnBossrushWave, () -> void) {
+	super();
+	ProcessPostStartAmbushWaveCallback(true);
+}
+
+//POST_START_GREED_WAVE (1489)
+HOOK_METHOD(Room, SpawnGreedModeWave, (bool unusedBool) -> void) {
+	super(unusedBool);
+
+	const int callbackid = 1489;
+	if (CallbackState.test(callbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+		lua::LuaResults result = lua::LuaCaller(L).push(callbackid)
+			.pushnil()
+			.call(1);
+	}
+}
+
+static std::unordered_map<int, std::set<int>> _getTearHitParamsRecursionProtection;
+
+// MC_EVALUATE_TEAR_HIT_PARAMS (1490)
+HOOK_METHOD(Entity_Player, GetTearHitParams, (TearParams* params, int weaponType, float damageScale, int tearDisplacement, Entity* source) -> TearParams*) {
+	std::set<int>* recursionProtection = &_getTearHitParamsRecursionProtection[this->_playerIndex];
+
+	params = super(params, weaponType, damageScale, tearDisplacement, source);
+
+	if (recursionProtection->find(weaponType) != recursionProtection->end()) {
+		return params;
+	}
+
+	recursionProtection->insert(weaponType);
+
+	const int callbackid = 1490;
+	if (CallbackState.test(callbackid - 1000)) {
+		lua_State* L = g_LuaEngine->_state;
+		lua::LuaStackProtector protector(L);
+
+		lua_rawgeti(L, LUA_REGISTRYINDEX, g_LuaEngine->runCallbackRegistry->key);
+
+		lua::LuaResults results = lua::LuaCaller(L).push(callbackid)
+			.push(this->GetPlayerType())
+			.push(this, lua::Metatables::ENTITY_PLAYER)
+			.push(params, lua::Metatables::TEAR_PARAMS)
+			.push(weaponType)
+			.push(damageScale)
+			.push(tearDisplacement)
+			.push(source, lua::Metatables::ENTITY)
+			.call(1);
+
+		if (!results && lua_isuserdata(L, -1)) {
+			auto* ud = lua::GetLuabridgeUserdata<TearParams*>(L, -1, lua::Metatables::TEAR_PARAMS, "TearParams");
+
+			if (!ud) {
+				KAGE::LogMessage(2, "Invalid userdata returned in MC_EVALUATE_TEAR_HIT_PARAMS!");
+			}
+			else {
+				*params = *ud;
+			}
+		}
+	}
+
+	recursionProtection->erase(weaponType);
+	
+
+	return params;
 }

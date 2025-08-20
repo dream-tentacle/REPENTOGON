@@ -87,5 +87,6 @@ ___
 ### GetTriggerChance () {: aria-label='Functions' }
 #### float GetTriggerChance ( ) {: .copyable aria-label='Functions' }
 
-Values range from `0` to `1`.
+This is the chance that the game actually uses. In most cases, this value ranges from `0` to `1`.
+
 ___

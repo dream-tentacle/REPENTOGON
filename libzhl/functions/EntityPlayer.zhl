@@ -27,8 +27,11 @@ __thiscall void Entity_Player::update_greeds_gullet();
 __thiscall void Entity_Player::trigger_max_hearts_removed(int removed);
 
 //AddCollectible - 
-"558bec6aff68????????64a1????????5081ece4030000":
+"558bec6aff68????????64a1????????5081ece0030000":
 __thiscall void Entity_Player::AddCollectible(int type, int charge, bool firsttime,int slot,int vardata, int unk);
+
+"558bec83e4f883ec24a1????????33c4894424??8b45??5356894424":
+__thiscall void Entity_Player::AddTrinket(int type, bool firsttime);
 
 //AddBrokenHearts
 "558bec83e4f8568bf15783be????????2875??8b86????????85c074??8bf083be????????2874??8bbe":
@@ -73,7 +76,7 @@ __thiscall Entity_Player* Entity_Player::InitTwin(int playerType); //replace wit
 "558bec83e4f881ec540100008bd1":
 __thiscall Entity* Entity_Player::ThrowHeldEntity(Vector* Velocity);
 
-"558bec6aff68????????64a1????????5081ece8000000a1????????33c58945??53":
+"558bec6aff68????????64a1????????5081ecec000000a1????????33c58945??535657508d45??64a3????????8bf9":
 __thiscall void Entity_Player::InitPostLevelInitStats();
 
 "558bec83e4f081ec5801000056":
@@ -121,7 +124,7 @@ __thiscall void Entity_Player::RenderBody(Vector *position);
 "558bec6aff68????????64a1????????5081ec88000000a1????????33c58945??5657508d45??64a3????????8bf9897d??688f000000":
 __thiscall void Entity_Player::TriggerRoomClear();
 
-"558bec83e4f883ec0c538b5d??56578bf985db":
+"558bec83e4f883ec0c538b5d??56578bf985db78":
 __thiscall bool Entity_Player::CanUseCollectible(CollectibleType collectible, int slot);
 
 "558bec83e4f883ec1c538b5d??56578bf98b0d":
@@ -148,10 +151,10 @@ __thiscall void Entity_Player::AddCacheFlags(int flags);
 "558bec8b45??83f80377??c1e0058b84??????????5dc2040033c05dc20400??8b81":
 __thiscall int Entity_Player::GetActiveItem(int slot);
 
-"558bec8b55??33c081c16c150000":
+"558bec8b55??33c081c174150000":
 __thiscall int Entity_Player::GetActiveItemSlot(int id);
 
-"558bec8b55??8b81????????c1e205":
+"558bec8b55??538bda":
 __thiscall int Entity_Player::GetTotalActiveCharge(int slot);
 
 "558bec8b45??568b75??81fe1e010000":
@@ -170,19 +173,19 @@ __thiscall void Entity_Player::SetActiveVarData(int vardata, int slot);
 "558bec8b45??83f80377??c1e0058b84??????????5dc2040033c05dc20400??80b9????????00":
 __thiscall int Entity_Player::GetActiveCharge(int slot);
 
-"558bec8b45??83f80377??c1e0058b84??????????5dc2040033c05dc20400??8a81":
+"558bec8b45??83f80377??c1e0058b84??????????5dc2040033c05dc20400??55":
 __thiscall int Entity_Player::GetActiveSubCharge(int slot);
 
-"558bec8b45??83f80377??c1e0058b84??????????5dc2040033c05dc20400??8d81":
+"558bec8b45??83f80377??05ac000000":
 __thiscall int Entity_Player::GetBatteryCharge(int slot);
 
 "558bec53568b75??578bf985f679":
 __thiscall bool Entity_Player::NeedsCharge(int slot);
 
-"558bec83e4f85153568b75??578bf985f679??8b5d":
+"558bec83e4f883ec0c538b5d??56578bf985db79":
 __thiscall void Entity_Player::SetActiveCharge(int charge, int slot);
 
-"558bec83e4f883ec14538b5d??56578bf985db":
+"558bec83e4f883ec1c538b5d??56578bf985db":
 __thiscall int Entity_Player::AddActiveCharge(int charge, int slot, bool flashHUD, bool overcharge, bool force);
 
 "558bec83e4f85153568b75??8bd95785f6":
@@ -292,7 +295,7 @@ __thiscall void Entity_Player::ShuffleCostumes(int seed);
 "558bec83ec2ca1????????33c58945??538b5d":
 __thiscall void Entity_Player::RemoveCollectible(unsigned int CollectibleType, bool IgnoreModifiers, unsigned int ActiveSlot, bool RemoveFromPlayerForm);
 
-"558bec6aff68????????64a1????????50b8f0170000":
+"558bec6aff68????????64a1????????50b8e0170000":
 __thiscall void Entity_Player::UpdateEffects();
 
 "558bec6aff68????????64a1????????5083ec6ca1????????33c58945??5657508d45??64a3????????8bf1807d??00":
@@ -360,7 +363,7 @@ __thiscall void Entity_Player::ClearCollectibleAnim(CollectibleType collectible)
 //"568bf180be????????0075??a1":
 //__thiscall void Entity_Player::ClearItemAnimNullItems(int unused);
 
-"558bec83e4f856576a00":
+"558bec83e4f856576a0068fb000000":
 __thiscall unsigned int Entity_Player::GetMaxPocketItems();
 
 "558bec515356578bf1e8????????837d??02":
@@ -481,7 +484,7 @@ __thiscall void Entity_Player::DropPocketItem(int slot, Vector* pos);
 "558bec6aff68????????64a1????????5083ec58535657a1????????33c5508d45??64a3????????8bf9":
 __thiscall void Entity_Player::RerollAllCollectibles(RNG * rng, bool includeActives);
 
-"558bec83ec0c568bf1837e??00":
+"558bec83e4f883ec10568bf157837e??00":
 __thiscall void Entity_Player::ResetPlayer();
 
 "558bec83e4f883ec145356578bf9c74424??00001000":
@@ -536,13 +539,14 @@ __thiscall RNG* Entity_Player::GetCollectibleRNG(int id);
 "558bec83e4f851538bd98b8b????????568b75":
 __thiscall void Entity_Player::AttachMinecart(Entity_NPC * minecart);
 
-"558bec518b89????????83f929":
-__thiscall float Entity_Player::GetGreedDonationBreakChance();
+// rep+ moved the output from st0 to xmm0, and added optional PersistentGameData* param
+// "558bec518b89????????83f929":
+// __thiscall float<xmm0> Entity_Player::GetGreedDonationBreakChance(PersistentGameData* pgd);
 
 "568bf1e8????????84c074??8d8e":
 __thiscall void Entity_Player::ClearQueueItem();
 
-"558bec6aff68????????64a1????????5081ece4010000a1????????33c58945??53":
+"558bec6aff68????????64a1????????5081ece8010000a1????????33c58945??53":
 __thiscall void Entity_Player::TriggerEffectRemoved(ItemConfig_Item* item, int unused);
 
 "558bec515356576a00":
@@ -551,8 +555,13 @@ __thiscall bool Entity_Player::HasGoldenTrinket(unsigned int TrinketID);
 "558bec83e4f881eca4000000a1????????33c4898424????????5356":
 __thiscall void Entity_Player::TriggerEnemyDeath(Entity_NPC * npc);
 
+"558bec5153568b75??578bf981fe02010000":
+__thiscall bool Entity_Player::CanRerollCollectible(int id, bool unk);
 
-struct Entity_Player depends (ANM2, ColorMod, KColor, PlayerCostumeMap, TemporaryEffects, ConsumableData, History, BagOfCraftingOutput) : public Entity { {{
+"558bec5356578bf98b4d":
+__thiscall bool Entity_Player::HasInvincibility(uint64_t damageFlags, EntityRef* source);
+
+struct Entity_Player depends (Vector, ANM2, ColorMod, KColor, PlayerCostumeMap, TemporaryEffects, ConsumableData, History, BagOfCraftingOutput) : public Entity { {{
     inline int* GetMaxHearts() {return &this->_maxHearts; }
 	inline int* GetRedHearts() {return &this->_redHearts; }
 	inline int* GetEternalHearts() {return &this->_eternalHearts; }
@@ -625,12 +634,13 @@ struct Entity_Player depends (ANM2, ColorMod, KColor, PlayerCostumeMap, Temporar
 		skip; // PostRender
 		
         override
-        "558bec6aff68????????64a1????????5081ec38010000":
+        "558bec6aff68????????64a1????????5081ec3c010000":
         bool TakeDamage(float Damage, unsigned long long DamageFlags, EntityRef *Source, int DamageCountdown);
 		
 		skip; // Kill
 		skip; // Remove
 		skip; // TriggerGlowingHourglass
+		skip; // ???
 		skip; // GetRenderZ
 		skip; // CanOverwrite
 		skip; // SetColor
@@ -662,111 +672,118 @@ struct Entity_Player depends (ANM2, ColorMod, KColor, PlayerCostumeMap, Temporar
 	inline uint8_t* GetWildCardItemType() { return &this->_wildCardItemType; }
 	inline int* GetWildCardItem() { return &this->_wildCardItem; }
 	inline Entity_Player* GetBackupPlayer() { return this->_backupPlayer; }
-	
-	bool LIBZHL_API AddSmeltedTrinket(int trinketID, bool firstTime);
     }}
 
-	ANM2 _heldSprite : 0xff0;
-	vector_CostumeSpriteDesc _costumeSpriteDescs : 0x1218;
-	PlayerCostumeMap _playerCostumeMap[15] : 0x1224;
-	std_string _headAnim : 0x1318;
-	int _blinkTime : 0x1330;
-	int _headDirectionTime : 0x1334;
-	int _maxHearts : 0x1338, _redHearts : 0x133c,  _eternalHearts : 0x1340, _soulHearts : 0x1344, _blackHearts : 0x1348;
-	int _numKeys : 0x1354;
-	bool _hasGoldenKey : 0x1358;
-	bool _hasGoldenBomb : 0x1359;
-	int _numBombs : 0x135c;
-	int _numCoins : 0x1360;
-	int _gnawedLeafTimer : 0x136c;
-	short _bloodLustCounter : 0x1374;	//not sure whether its actually short but we are on x86 so who cares lul
-	int _metronomeCollectibleID : 0x1380;
-	int _monkeyPawCounter : 0x138c;
-	int _damageCooldown : 0x13b0;
-	int _playerType: 0x13b4;
-	Weapon* _weapon[5] : 0x13d0;
-	Entity_Effect* _markedTarget : 0x1400;
-	Entity* _heldEntity : 0x1404;
-	float _maxfiredelay : 0x1454;
-	float _shotspeed : 0x1458;
-	float _damage : 0x1464;
-	float _tearheight : 0x1468;
-	float _tearfallspeed : 0x146c;
-	float _tearfallaccel : 0x1470;
-	float _tearrange : 0x1474;
-	ColorMod _laserColor : 0x14b4;
-	TemporaryEffects _temporaryeffects : 0x14f8;
-	int _speedModifier : 0x1510, _fireDelayModifier : 0x1514, _damageModifier : 0x1518, _tearRangeModifier : 0x151c, _shotSpeedModifier : 0x1520, _luckModifier : 0x1524;
-	float _edenSpeed : 0x1538, _edenFireDelay : 0x153c, _edenDamage : 0x1540, _edenTearRange : 0x1544, _edenShotSpeed : 0x1548, _edenLuck : 0x154c;
-	float _movespeed : 0x1554;
-	float _luck : 0x1558;
-	bool _canFly : 0x155c;
-	uint32_t _cacheFlags : 0x1560;
-	int8_t _tearDisplacement : 0x1564;
-	float _tearPoisonDamage : 0x1568;
-	ActiveItemDesc _activeDesc[4] : 0x156c;
-	int _bombPlaceDelay : 0x15fc;
-	int _forgottenSwapFormCooldown : 0x1600;
-	int _controllerIndex : 0x1604;
-	int _playerIndex : 0x1608;
-	int _moveDirection : 0x1610;
-	int _headDirection: 0x1614;
-	uint32_t _trinketsID[2] : 0x16a8;
-	std_vector_int _collectibleCounts: 0x16b0;
-	vector_SmeltedTrinketDesc _smeltedTrinkets : 0x1730;
-	std_vector_int _voidedCollectibles : 0x173c;
-	uint32_t _actionHoldDrop : 0x17a8;
-	int _playerForms[15] : 0x17c4;
-	bool _canShoot : 0x1809;
-	ColorMod _footprintColor1 : 0x180c;
-	ColorMod _footprintColor2 : 0x1838;
-	int _ponyCharge : 0x186c;
-	int _epiphoraCharge : 0x1888;
-	uint32_t _deadEyeCharges : 0x1894;
-	uint32_t _deadEyeMisses : 0x1898;
-	int _megaBlastDuration : 0x18d8;
-	int _peeBurstCooldown : 0x18dc;
-	int _maxPeeBurstCooldown : 0x18e0;
-	int _bladderCharge : 0x18e4;
-	int _maxBladderCharge : 0x18e8;
-	bool _isUrethraBlocked : 0x18ec;
-	int _nextUrethraBlockFrame : 0x18f0;
-	int _purityState : 0x1910;
-	int _immaculateConceptionState : 0x1914;
-	int _cambionConceptionState : 0x1918;
-	uint32_t _conceptionFamiliarFlags : 0x191c;
-	float _d8DamageModifier : 0x1920;
-	float _d8SpeedModifier : 0x1924;
-	float _d8RangeModifier : 0x1928;
-	float _d8FireDelayModifier : 0x192c;
-	int _goldenHearts : 0x1930;
-	int _babySkin : 0x1ad0;
-	uint32_t _urnSouls: 0x1cf0;
-	//std_vector_int _wispStorage : 0x1cfc;
-	vector_EntitySaveState _movingBoxContents : 0x1d60;
-	int _boneHearts : 0x1d6c;
-	int _boneHeartsMask : 0x1d70;
-	int _hallowedGroundCountdown : 0x1d74;
-	int _brokenHearts : 0x1d84;
-	int _rottenHearts : 0x1d88;
-	int _numGigaBombs : 0x1db8;
-	History _history : 0x1dd0;
-	Entity_Player* _twinPlayer : 0x1e44;
-	Entity_Player* _backupPlayer : 0x1e48;
-	int _redStewBonusDuration : 0x1e50;
-	float _rockBottomMoveSpeed : 0x1e8c, _rockBottomMaxFireDelay : 0x1e90, _rockBottomDamage : 0x1e94, _rockBottomTearRange : 0x1e98, _rockBottomShotSpeed : 0x1e9c, _rockBottomLuck : 0x1ea0;
-	int _keepersSackBonus : 0x1eb8;
-	int _maggySwingCooldown : 0x1ec0;
-	char _bagOfCraftingContent[8]: 0x1f18;
-	BagOfCraftingOutput _bagOfCraftingOutput : 0x1f20;
-	char _poopSpellQueue[6] : 0x1f28;
-	int _eveSumptoriumCharge : 0x1f4c;
-	std_map_int_int _itemWispsList : 0x1f54;
-	ConsumableData _consumablesBackup : 0x200c;
-	uint8_t _wildCardItemType : 0x205c;
-	int _wildCardItem : 0x2060;
-	bool _isCoopGhost : 0x2074;
-} : 0x2e98;
+	ANM2 _heldSprite : 0xff8;
+	vector_CostumeSpriteDesc _costumeSpriteDescs : 0x1220;
+	PlayerCostumeMap _playerCostumeMap[15] : 0x122c;
+	std_string _headAnim : 0x1320;
+	int _blinkTime : 0x1338;
+	int _headDirectionTime : 0x133c;
+	int _maxHearts : 0x1340, _redHearts : 0x1344,  _eternalHearts : 0x1348, _soulHearts : 0x134c, _blackHearts : 0x1350;
+	int _numKeys : 0x135c;
+	bool _hasGoldenKey : 0x1360;
+	bool _hasGoldenBomb : 0x1361;
+	int _numBombs : 0x1364;
+	int _numCoins : 0x1368;
+	int _gnawedLeafTimer : 0x1374;
+	short _bloodLustCounter : 0x137c;	//not sure whether its actually short but we are on x86 so who cares lul
+	int _metronomeCollectibleID : 0x1388;
+	int _monkeyPawCounter : 0x1394;
+	int _damageCooldown : 0x13b8;
+	int _playerType: 0x13bc;
+	Weapon* _weapon[5] : 0x13d8;
+	Entity_Effect* _markedTarget : 0x1408;
+	Entity* _heldEntity : 0x140c;
+	float _maxfiredelay : 0x145c;
+	float _shotspeed : 0x1460;
+	float _damage : 0x146c;
+	float _tearheight : 0x1470;
+	float _tearfallspeed : 0x1474;
+	float _tearfallaccel : 0x1478;
+	float _tearrange : 0x147c;
+	ColorMod _laserColor : 0x14bc;
+	TemporaryEffects _temporaryeffects : 0x1500;
+	int _speedModifier : 0x1518, _fireDelayModifier : 0x151c, _damageModifier : 0x1520, _tearRangeModifier : 0x1524, _shotSpeedModifier : 0x1528, _luckModifier : 0x152c;
+	float _edenSpeed : 0x1540, _edenFireDelay : 0x1544, _edenDamage : 0x1548, _edenTearRange : 0x154c, _edenShotSpeed : 0x1550, _edenLuck : 0x1554;
+	float _movespeed : 0x155c;
+	float _luck : 0x1560;
+	bool _canFly : 0x1564;
+	uint32_t _cacheFlags : 0x1568;
+	int8_t _tearDisplacement : 0x156c;
+	float _tearPoisonDamage : 0x1570;
+	ActiveItemDesc _activeDesc[4] : 0x1574;
+	int _bombPlaceDelay : 0x1604;
+	int _forgottenSwapFormCooldown : 0x1608;
+	int _controllerIndex : 0x160c;
+	int _playerIndex : 0x1610;
+	int _moveDirection : 0x1618;
+	int _headDirection: 0x161c;
+	uint32_t _trinketsID[2] : 0x16b0;
+	std_vector_int _collectibleCounts: 0x16b8;
+	vector_SmeltedTrinketDesc _smeltedTrinkets : 0x1738;
+	std_vector_int _voidedCollectibles : 0x1744;
+	uint32_t _actionHoldDrop : 0x17b0;
+	int _playerForms[15] : 0x17cc;
+	bool _canShoot : 0x1811;
+	ColorMod _footprintColor1 : 0x1814;
+	ColorMod _footprintColor2 : 0x1840;
+	int _ponyCharge : 0x1874;
+	int _epiphoraCharge : 0x1890;
+	uint32_t _deadEyeCharges : 0x189c;
+	uint32_t _deadEyeMisses : 0x18a0;
+	int _megaBlastDuration : 0x18e0;
+	int _peeBurstCooldown : 0x18e4;
+	int _maxPeeBurstCooldown : 0x18e8;
+	int _bladderCharge : 0x18ec;
+	int _maxBladderCharge : 0x18f0;
+	bool _isUrethraBlocked : 0x18f4;
+	int _nextUrethraBlockFrame : 0x18f8;
+	int _purityState : 0x1918;
+	int _immaculateConceptionState : 0x191c;
+	int _cambionConceptionState : 0x1920;
+	uint32_t _conceptionFamiliarFlags : 0x1924;
+	float _d8DamageModifier : 0x1928;
+	float _d8SpeedModifier : 0x192c;
+	float _d8RangeModifier : 0x1930;
+	float _d8FireDelayModifier : 0x1934;
+	int _goldenHearts : 0x1938;
+	int _babySkin : 0x1ad8;
+	uint32_t _urnSouls: 0x1cf8;
+	//std_vector_int _wispStorage : 0x1d04;
+	vector_EntitySaveState _movingBoxContents : 0x1d68;
+	int _boneHearts : 0x1d74;
+	int _boneHeartsMask : 0x1d78;
+	int _hallowedGroundCountdown : 0x1d7c;
+	int _brokenHearts : 0x1d8c;
+	int _rottenHearts : 0x1d90;
+	uint16_t _candyHeartStatUps[6] : 0x1d9c;
+	uint16_t _soulLocketStatUps[6] : 0x1da8;
+	int _numGigaBombs : 0x1dc0;
+	History _history : 0x1dd8;
+	deque_afterImageFrames _afterImageFrames : 0x1e38;
+	Entity_Player* _twinPlayer : 0x1e4c;
+	Entity_Player* _backupPlayer : 0x1e50;
+	int _redStewBonusDuration : 0x1e58;
+	float _rockBottomMoveSpeed : 0x1e94, _rockBottomMaxFireDelay : 0x1e98, _rockBottomDamage : 0x1e9c, _rockBottomTearRange : 0x1ea0, _rockBottomShotSpeed : 0x1ea4, _rockBottomLuck : 0x1ea8;
+	int _revelationChargeTimer : 0x1ec0;
+	int _maggySwingCooldown : 0x1ed4;
+	int _suplexState : 0x1f08;
+	int _suplexAimCountdown : 0x1f0c;
+	Vector _suplexTargetPos : 0x1f10;
+	Vector _suplexLandPos : 0x1f18;
+	char _bagOfCraftingContent[8]: 0x1f20;
+	BagOfCraftingOutput _bagOfCraftingOutput : 0x1f28;
+	char _poopSpellQueue[6] : 0x1f30;
+	int _eveSumptoriumCharge : 0x1f54;
+	std_map_int_int _itemWispsList : 0x1f5c;
+	int _keepersSackBonus : 0x1f98;
+	ConsumableData _consumablesBackup : 0x2014;
+	uint8_t _wildCardItemType : 0x2064;
+	int _wildCardItem : 0x2068;
+	bool _isCoopGhost : 0x207d;
+	PlayerHUD* _playerHUD : 0x20a8;
+} : 0x2ea0;
 
 "68(????????)68????????f30f59c16a00":
 reference void* EntityPlayerRTTI;

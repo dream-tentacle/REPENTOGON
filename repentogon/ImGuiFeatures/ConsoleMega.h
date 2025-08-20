@@ -125,6 +125,8 @@ struct ConsoleMega : ImGuiWindowObject {
     bool reclaimFocus = false;
     bool focused = false;
     bool commandNeedScrollChange = false;
+    const ConsoleCommand* prev_command = nullptr;
+    std::set<AutocompleteEntry> entries;
 
     static void  Strtrim(char* s) { char* str_end = s + strlen(s); while (str_end > s && str_end[-1] == ' ') str_end--; *str_end = 0; }
 
@@ -240,6 +242,7 @@ struct ConsoleMega : ImGuiWindowObject {
         RegisterCommand("stage", LANG.CONSOLE_STAGE_DESC, LANG.CONSOLE_STAGE_HELP, false, STAGE);
         RegisterCommand("time", LANG.CONSOLE_TIME_DESC, LANG.CONSOLE_TIME_HELP, false);
         RegisterCommand("testbosspool", LANG.CONSOLE_TESTBOSSPOOL_DESC, LANG.CONSOLE_TESTBOSSPOOL_HELP, false);
+        RegisterCommand("forceimport", LANG.CONSOLE_FORCEIMPORT_DESC, LANG.CONSOLE_FORCEIMPORT_HELP, true);
     }
 
     const ConsoleCommand* GetCommandByName(std::string& commandName) {
@@ -306,8 +309,35 @@ struct ConsoleMega : ImGuiWindowObject {
                 console->_commandHistory = newHistory;
         }
 
-        console->_input = input;
-        console->SubmitInput(false);
+        //multiline support for history + support for multiline cmds
+        std::string inputstr = input;
+        bool islua = (inputstr.find("lua ") == 0) || (inputstr.find("l ") == 0); 
+        if (inputstr.find("\\n") > 0) {
+            std::istringstream stream(input);
+            std::string line;
+            std::string historyentry = "";
+            while (std::getline(stream, line)) {
+                if (!islua) {
+                    console->_input = line;
+                    console->SubmitInput(false);
+                    console->_commandHistory.pop_front();
+                }
+                if (historyentry.length() > 0) {
+                    historyentry += "\\-|newline|-\\"; //hacky teim! (these multiline things dont even work in vanilla anyway)
+                }
+                historyentry += line; 
+            }
+            if (islua) {
+                console->_input = std::string(input);
+                console->SubmitInput(false);
+                console->_commandHistory.pop_front();
+            }
+            console->_commandHistory.push_front(historyentry);
+        }//multiline support for history + support for multiline cmds end
+        else {
+            console->_input = std::string(input);
+            console->SubmitInput(false);
+        }
 
         if (clear)
             console->_commandHistory.pop_front();
@@ -421,12 +451,16 @@ struct ConsoleMega : ImGuiWindowObject {
               }
 
               if (ImGui::InputTextMultiline("##", inputBuf, 1024, ImVec2(0, (ImGui::GetStyle().FramePadding.y * 2) + (imFontUnifont->Scale * imFontUnifont->FontSize) + (textInputScrollbarVisible ? 14 : 0)), consoleFlags, &TextEditCallbackStub, (void*)this)) {
-                  char* s = inputBuf;
-                  Strtrim(s);
-                  std::string fixedCommand = FixSpawnCommand(s);
-                  s = (char*)fixedCommand.c_str();
-                  if (s[0])
-                      ExecuteCommand(s);
+                  if (!ImGui::GetIO().KeyShift) { // Prevent submission when Shift+Enter is pressed
+                      char* s = inputBuf;
+                      Strtrim(s);
+                      std::string fixedCommand = FixSpawnCommand(s);
+                      s = (char*)fixedCommand.c_str();
+                      if (s[0])
+                          ExecuteCommand(s);
+                      
+                  }
+                  else { reclaimFocus = true; }
                   ImGui::SetKeyboardFocusHere(0);
               }
               ImGui::PopItemWidth();
@@ -473,6 +507,7 @@ struct ConsoleMega : ImGuiWindowObject {
     {
         switch (data->EventFlag)
         {
+
             case ImGuiInputTextFlags_CallbackAlways:
             {
 
@@ -495,6 +530,15 @@ struct ConsoleMega : ImGuiWindowObject {
                 if (data->CursorPos * textSize > ImGui::GetScrollX() + ImGui::GetContentRegionAvail().x) {
                     ImGui::SetScrollX(textSize + data->CursorPos * textSize - ImGui::GetContentRegionAvail().x - imFontUnifont->Scale);
                 }
+
+
+                if (ImGui::IsKeyPressed(ImGuiKey_Enter, false)) { //stupid shit to make shift-enter do its thing
+                    ImGuiIO& io = ImGui::GetIO();
+                    if (io.KeyShift && !io.KeyCtrl) {
+                        data->InsertChars(data->CursorPos, "\n"); 
+                    }
+                }
+
 
                 break;
             }
@@ -543,7 +587,13 @@ struct ConsoleMega : ImGuiWindowObject {
                     const ConsoleCommand* command = GetCommandByName(commandName);
                     if (command == nullptr) return 0;
 
-                    std::set<AutocompleteEntry> entries;
+                    if (command == prev_command) {
+                        goto end_of_autocompl_switchcase;   //yeeees, i knoooow, goto bad blah blah blah
+                    }
+                    else {
+                        entries.clear();    //clear the entries queue before working with it
+                        prev_command = command;
+                    };
 
                     switch (command->autocompleteType) {
                         case ENTITY: {
@@ -615,6 +665,7 @@ struct ConsoleMega : ImGuiWindowObject {
                                 std::pair<int, std::string>(27, "secretexit"),
                                 std::pair<int, std::string>(28, "blue"),
                                 std::pair<int, std::string>(29, "ultrasecret"),
+                                std::pair<int, std::string>(30, "deathmatch"),
                             };
 
                             for (unsigned int i = 1; i < set->_count; ++i) {
@@ -732,108 +783,117 @@ struct ConsoleMega : ImGuiWindowObject {
 
                         case GRID: {
                             entries = {
-                                AutocompleteEntry("0", "Decoration"),
-                                AutocompleteEntry("1000", "Rock"),
-                                AutocompleteEntry("1001", "Bomb Rock"),
-                                AutocompleteEntry("1002", "Alt Rock"),
-                                AutocompleteEntry("1003", "Tinted Rock"),
-                                AutocompleteEntry("1008", "Marked Skull"),
-                                AutocompleteEntry("1009", "Event Rock"),
-                                AutocompleteEntry("1010", "Spiked Rock"),
-                                AutocompleteEntry("1011", "Fool's Gold Rock"),
-                                AutocompleteEntry("1300", "TNT"),
-                                AutocompleteEntry("1490", "Red Poop"),
-                                AutocompleteEntry("1494", "Rainbow Poop"),
-                                AutocompleteEntry("1495", "Corny Poop"),
-                                AutocompleteEntry("1496", "Golden Poop"),
-                                AutocompleteEntry("1497", "Black Poop"),
-                                AutocompleteEntry("1498", "White Poop"),
-                                AutocompleteEntry("1499", "Giant Poop"),
-                                AutocompleteEntry("1500", "Poop"),
-                                AutocompleteEntry("1501", "Charming Poop"),
-                                AutocompleteEntry("1900", "Block"),
-                                AutocompleteEntry("1901", "Pillar"),
-                                AutocompleteEntry("1930", "Spikes"),
-                                AutocompleteEntry("1931", "Retracting Spikes"),
-                                AutocompleteEntry("1931.1", "Retracting Spikes (Down 1/5)"),
-                                AutocompleteEntry("1931.2", "Retracting Spikes (Down 2/5)"),
-                                AutocompleteEntry("1931.3", "Retracting Spikes (Down 3/5)"),
-                                AutocompleteEntry("1931.4", "Retracting Spikes (Down 4/5)"),
-                                AutocompleteEntry("1931.5", "Retracting Spikes (Down 5/5)"),
-                                AutocompleteEntry("1931.6", "Retracting Spikes (Up 1/5)"),
-                                AutocompleteEntry("1931.7", "Retracting Spikes (Up 2/5)"),
-                                AutocompleteEntry("1931.8", "Retracting Spikes (Up 3/5)"),
-                                AutocompleteEntry("1931.9", "Retracting Spikes (Up 4/5)"),
-                                AutocompleteEntry("1931.10", "Retracting Spikes (Up 5/5)"),
-                                AutocompleteEntry("1940", "Cobweb"),
-                                AutocompleteEntry("1999", "Invisible Block"),
-                                AutocompleteEntry("3000", "Pit"),
-                                AutocompleteEntry("3001", "Fissure Spawner"),
-                                AutocompleteEntry("3002", "Event Rail"),
-                                AutocompleteEntry("3009", "Event Pit"),
-                                AutocompleteEntry("4000", "Key Block"),
-                                AutocompleteEntry("4500", "Pressure Plate"),
-                                AutocompleteEntry("4500.1", "Reward Plate"),
-                                AutocompleteEntry("4500.2", "Greed Plate"),
-                                AutocompleteEntry("4500.3", "Rail Plate"),
-                                AutocompleteEntry("4500.9", "Kill Plate"),
-                                AutocompleteEntry("4500.10", "Event Plate (group 0)"),
-                                AutocompleteEntry("4500.11", "Event Plate (group 1)"),
-                                AutocompleteEntry("4500.12", "Event Plate (group 2)"),
-                                AutocompleteEntry("4500.13", "Event Plate (group 3)"),
-                                AutocompleteEntry("5000", "Devil Statue"),
-                                AutocompleteEntry("5001", "Angel Statue"),
-                                AutocompleteEntry("6000", "Rail (horizontal)"),
-                                AutocompleteEntry("6000.1", "Rail (vertical)"),
-                                AutocompleteEntry("6000.2", "Rail (down-to-right)"),
-                                AutocompleteEntry("6000.3", "Rail (down-to-left)"),
-                                AutocompleteEntry("6000.4", "Rail (up-to-right)"),
-                                AutocompleteEntry("6000.5", "Rail (up-to-left)"),
-                                AutocompleteEntry("6000.6", "Rail (crossroad)"),
-                                AutocompleteEntry("6000.7", "Rail (end-left)"),
-                                AutocompleteEntry("6000.8", "Rail (end-right)"),
-                                AutocompleteEntry("6000.9", "Rail (end-up)"),
-                                AutocompleteEntry("6000.10", "Rail (end-down)"),
-                                AutocompleteEntry("6000.16", "Rail (cart-left)"),
-                                AutocompleteEntry("6000.17", "Rail (cart-up)"),
-                                AutocompleteEntry("6000.32", "Rail (cart-right)"),
-                                AutocompleteEntry("6000.33", "Rail (cart-down)"),
-                                AutocompleteEntry("6000.80", "Mineshaft Rail (horizontal 1)"),
-                                AutocompleteEntry("6000.81", "Mineshaft Rail (vertical 1)"),
-                                AutocompleteEntry("6000.82", "Mineshaft Rail (down-to-right 1)"),
-                                AutocompleteEntry("6000.83", "Mineshaft Rail (down-to-left 1)"),
-                                AutocompleteEntry("6000.84", "Mineshaft Rail (up-to-right 1)"),
-                                AutocompleteEntry("6000.85", "Mineshaft Rail (up-to-left 1)"),
-                                AutocompleteEntry("6000.96", "Mineshaft Rail (horizontal 2)"),
-                                AutocompleteEntry("6000.97", "Mineshaft Rail (vertical 2)"),
-                                AutocompleteEntry("6000.98", "Mineshaft Rail (down-to-right 2)"),
-                                AutocompleteEntry("6000.99", "Mineshaft Rail (down-to-left 2)"),
-                                AutocompleteEntry("6000.100", "Mineshaft Rail (up-to-right 2)"),
-                                AutocompleteEntry("6000.101", "Mineshaft Rail (up-to-left 2)"),
-                                AutocompleteEntry("6000.112", "Mineshaft Rail (horizontal 3)"),
-                                AutocompleteEntry("6000.113", "Mineshaft Rail (vertical 3)"),
-                                AutocompleteEntry("6001", "Rail Pit (horizontal)"),
-                                AutocompleteEntry("6001.1", "Rail Pit (vertical)"),
-                                AutocompleteEntry("6001.2", "Rail Pit (down-to-right)"),
-                                AutocompleteEntry("6001.3", "Rail Pit (down-to-left)"),
-                                AutocompleteEntry("6001.4", "Rail Pit (up-to-right)"),
-                                AutocompleteEntry("6001.5", "Rail Pit (up-to-left)"),
-                                AutocompleteEntry("6001.6", "Rail Pit (crossroad)"),
-                                AutocompleteEntry("6001.16", "Rail Pit (cart-left)"),
-                                AutocompleteEntry("6001.17", "Rail Pit (cart-up)"),
-                                AutocompleteEntry("6001.32", "Rail Pit (cart-right)"),
-                                AutocompleteEntry("6001.33", "Rail Pit (cart-down)"),
-                                AutocompleteEntry("6100", "Teleporter (square)"),
-                                AutocompleteEntry("6100.1", "Teleporter (moon)"),
-                                AutocompleteEntry("6100.2", "Teleporter (rhombus)"),
-                                AutocompleteEntry("6100.3", "Teleporter (M)"),
-                                AutocompleteEntry("6100.4", "Teleporter (pentagram)"),
-                                AutocompleteEntry("6100.5", "Teleporter (cross)"),
-                                AutocompleteEntry("6100.6", "Teleporter (triangle)"),
-                                AutocompleteEntry("9000", "Trap Door"),
-                                AutocompleteEntry("9000.1", "Void Portal"),
-                                AutocompleteEntry("9100", "Crawlspace"),
-                                AutocompleteEntry("10000", "Gravity"),
+                                AutocompleteEntry("0.10", LANG.CONSOLE_GRID_DECORATION_A),
+                                AutocompleteEntry("0.20", LANG.CONSOLE_GRID_DECORATION_B),
+                                AutocompleteEntry("0.30", LANG.CONSOLE_GRID_DECORATION_C),
+                                AutocompleteEntry("1000", LANG.CONSOLE_GRID_ROCK),
+                                AutocompleteEntry("1000.1000", LANG.CONSOLE_GRID_ROCK_CONNECTING),
+                                AutocompleteEntry("1001", LANG.CONSOLE_GRID_BOMB_ROCK),
+                                AutocompleteEntry("1002", LANG.CONSOLE_GRID_ALT_ROCK),
+                                AutocompleteEntry("1003", LANG.CONSOLE_GRID_TINTED_ROCK),
+                                AutocompleteEntry("1008", LANG.CONSOLE_GRID_MARKED_SKULL),
+                                AutocompleteEntry("1009", LANG.CONSOLE_GRID_EVENT_ROCK),
+                                AutocompleteEntry("1010", LANG.CONSOLE_GRID_SPIKED_ROCK),
+                                AutocompleteEntry("1011", LANG.CONSOLE_GRID_FOOLS_GOLD_ROCK),
+                                AutocompleteEntry("1300", LANG.CONSOLE_GRID_TNT),
+                                AutocompleteEntry("1400", LANG.CONSOLE_GRID_FIRE_PLACE),
+                                AutocompleteEntry("1410", LANG.CONSOLE_GRID_RED_FIRE_PLACE),
+                                AutocompleteEntry("1490", LANG.CONSOLE_GRID_RED_POOP),
+                                AutocompleteEntry("1494", LANG.CONSOLE_GRID_RAINBOW_POOP),
+                                AutocompleteEntry("1495", LANG.CONSOLE_GRID_CORNY_POOP),
+                                AutocompleteEntry("1496", LANG.CONSOLE_GRID_GOLDEN_POOP),
+                                AutocompleteEntry("1497", LANG.CONSOLE_GRID_BLACK_POOP),
+                                AutocompleteEntry("1498", LANG.CONSOLE_GRID_WHITE_POOP),
+                                AutocompleteEntry("1499", LANG.CONSOLE_GRID_GIANT_POOP),
+                                AutocompleteEntry("1500", LANG.CONSOLE_GRID_POOP),
+                                AutocompleteEntry("1501", LANG.CONSOLE_GRID_CHARMING_POOP),
+                                AutocompleteEntry("1900", LANG.CONSOLE_GRID_BLOCK),
+                                AutocompleteEntry("1901", LANG.CONSOLE_GRID_PILLAR),
+                                AutocompleteEntry("1930", LANG.CONSOLE_GRID_SPIKES),
+                                AutocompleteEntry("1930.100", LANG.CONSOLE_GRID_SANGUINE_BOND_SPIKES),
+                                AutocompleteEntry("1931", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES),
+                                AutocompleteEntry("1931.1", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_DOWN_1_5),
+                                AutocompleteEntry("1931.2", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_DOWN_2_5),
+                                AutocompleteEntry("1931.3", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_DOWN_3_5),
+                                AutocompleteEntry("1931.4", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_DOWN_4_5),
+                                AutocompleteEntry("1931.5", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_DOWN_5_5),
+                                AutocompleteEntry("1931.6", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_UP_1_5),
+                                AutocompleteEntry("1931.7", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_UP_2_5),
+                                AutocompleteEntry("1931.8", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_UP_3_5),
+                                AutocompleteEntry("1931.9", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_UP_4_5),
+                                AutocompleteEntry("1931.10", LANG.CONSOLE_GRID_RETRACTABLE_SPIKES_UP_5_5),
+                                AutocompleteEntry("1940", LANG.CONSOLE_GRID_COBWEB),
+                                AutocompleteEntry("1999", LANG.CONSOLE_GRID_INVISIBLE_BLOCK),
+                                AutocompleteEntry("3000", LANG.CONSOLE_GRID_PIT),
+                                AutocompleteEntry("3001", LANG.CONSOLE_GRID_FISSURE_SPAWNER),
+                                AutocompleteEntry("3002", LANG.CONSOLE_GRID_EVENT_RAIL),
+                                AutocompleteEntry("3009", LANG.CONSOLE_GRID_EVENT_PIT),
+                                AutocompleteEntry("4000", LANG.CONSOLE_GRID_KEY_BLOCK),
+                                AutocompleteEntry("4500", LANG.CONSOLE_GRID_PRESSURE_PLATE),
+                                AutocompleteEntry("4500.1", LANG.CONSOLE_GRID_REWARD_PLATE),
+                                AutocompleteEntry("4500.2", LANG.CONSOLE_GRID_GREED_PLATE),
+                                AutocompleteEntry("4500.3", LANG.CONSOLE_GRID_RAIL_PLATE),
+                                AutocompleteEntry("4500.9", LANG.CONSOLE_GRID_KILL_PLATE),
+                                AutocompleteEntry("4500.10", LANG.CONSOLE_GRID_EVENT_PLATE_GROUP_0),
+                                AutocompleteEntry("4500.11", LANG.CONSOLE_GRID_EVENT_PLATE_GROUP_1),
+                                AutocompleteEntry("4500.12", LANG.CONSOLE_GRID_EVENT_PLATE_GROUP_2),
+                                AutocompleteEntry("4500.13", LANG.CONSOLE_GRID_EVENT_PLATE_GROUP_3),
+                                AutocompleteEntry("5000", LANG.CONSOLE_GRID_DEVIL_STATUE),
+                                AutocompleteEntry("5001", LANG.CONSOLE_GRID_ANGEL_STATUE),
+                                AutocompleteEntry("6000", LANG.CONSOLE_GRID_RAIL_HORIZONTAL),
+                                AutocompleteEntry("6000.1", LANG.CONSOLE_GRID_RAIL_VERTICAL),
+                                AutocompleteEntry("6000.2", LANG.CONSOLE_GRID_RAIL_DOWN_TO_RIGHT),
+                                AutocompleteEntry("6000.3", LANG.CONSOLE_GRID_RAIL_DOWN_TO_LEFT),
+                                AutocompleteEntry("6000.4", LANG.CONSOLE_GRID_RAIL_UP_TO_RIGHT),
+                                AutocompleteEntry("6000.5", LANG.CONSOLE_GRID_RAIL_UP_TO_LEFT),
+                                AutocompleteEntry("6000.6", LANG.CONSOLE_GRID_RAIL_CROSSROAD),
+                                AutocompleteEntry("6000.7", LANG.CONSOLE_GRID_RAIL_END_LEFT),
+                                AutocompleteEntry("6000.8", LANG.CONSOLE_GRID_RAIL_END_RIGHT),
+                                AutocompleteEntry("6000.9", LANG.CONSOLE_GRID_RAIL_END_UP),
+                                AutocompleteEntry("6000.10", LANG.CONSOLE_GRID_RAIL_END_DOWN),
+                                AutocompleteEntry("6000.16", LANG.CONSOLE_GRID_RAIL_CART_LEFT),
+                                AutocompleteEntry("6000.17", LANG.CONSOLE_GRID_RAIL_CART_UP),
+                                AutocompleteEntry("6000.32", LANG.CONSOLE_GRID_RAIL_CART_RIGHT),
+                                AutocompleteEntry("6000.33", LANG.CONSOLE_GRID_RAIL_CART_DOWN),
+                                AutocompleteEntry("6000.80", LANG.CONSOLE_GRID_MINESHAFT_RAIL_HORIZONTAL_1),
+                                AutocompleteEntry("6000.81", LANG.CONSOLE_GRID_MINESHAFT_RAIL_VERTICAL_1),
+                                AutocompleteEntry("6000.82", LANG.CONSOLE_GRID_MINESHAFT_RAIL_DOWN_TO_RIGHT_1),
+                                AutocompleteEntry("6000.83", LANG.CONSOLE_GRID_MINESHAFT_RAIL_DOWN_TO_LEFT_1),
+                                AutocompleteEntry("6000.84", LANG.CONSOLE_GRID_MINESHAFT_RAIL_UP_TO_RIGHT_1),
+                                AutocompleteEntry("6000.85", LANG.CONSOLE_GRID_MINESHAFT_RAIL_UP_TO_LEFT_1),
+                                AutocompleteEntry("6000.96", LANG.CONSOLE_GRID_MINESHAFT_RAIL_HORIZONTAL_2),
+                                AutocompleteEntry("6000.97", LANG.CONSOLE_GRID_MINESHAFT_RAIL_VERTICAL_2),
+                                AutocompleteEntry("6000.98", LANG.CONSOLE_GRID_MINESHAFT_RAIL_DOWN_TO_RIGHT_2),
+                                AutocompleteEntry("6000.99", LANG.CONSOLE_GRID_MINESHAFT_RAIL_DOWN_TO_LEFT_2),
+                                AutocompleteEntry("6000.100", LANG.CONSOLE_GRID_MINESHAFT_RAIL_UP_TO_RIGHT_2),
+                                AutocompleteEntry("6000.101", LANG.CONSOLE_GRID_MINESHAFT_RAIL_UP_TO_LEFT_2),
+                                AutocompleteEntry("6000.112", LANG.CONSOLE_GRID_MINESHAFT_RAIL_HORIZONTAL_3),
+                                AutocompleteEntry("6000.113", LANG.CONSOLE_GRID_MINESHAFT_RAIL_VERTICAL_3),
+                                AutocompleteEntry("6001", LANG.CONSOLE_GRID_RAIL_PIT_HORIZONTAL),
+                                AutocompleteEntry("6001.1", LANG.CONSOLE_GRID_RAIL_PIT_VERTICAL),
+                                AutocompleteEntry("6001.2", LANG.CONSOLE_GRID_RAIL_PIT_DOWN_TO_RIGHT),
+                                AutocompleteEntry("6001.3", LANG.CONSOLE_GRID_RAIL_PIT_DOWN_TO_LEFT),
+                                AutocompleteEntry("6001.4", LANG.CONSOLE_GRID_RAIL_PIT_UP_TO_RIGHT),
+                                AutocompleteEntry("6001.5", LANG.CONSOLE_GRID_RAIL_PIT_UP_TO_LEFT),
+                                AutocompleteEntry("6001.6", LANG.CONSOLE_GRID_RAIL_PIT_CROSSROAD),
+                                AutocompleteEntry("6001.16", LANG.CONSOLE_GRID_RAIL_PIT_CART_LEFT),
+                                AutocompleteEntry("6001.17", LANG.CONSOLE_GRID_RAIL_PIT_CART_UP),
+                                AutocompleteEntry("6001.32", LANG.CONSOLE_GRID_RAIL_PIT_CART_RIGHT),
+                                AutocompleteEntry("6001.33", LANG.CONSOLE_GRID_RAIL_PIT_CART_DOWN),
+                                AutocompleteEntry("6100", LANG.CONSOLE_GRID_TELEPORTER_SQUARE),
+                                AutocompleteEntry("6100.1", LANG.CONSOLE_GRID_TELEPORTER_MOON),
+                                AutocompleteEntry("6100.2", LANG.CONSOLE_GRID_TELEPORTER_RHOMBUS),
+                                AutocompleteEntry("6100.3", LANG.CONSOLE_GRID_TELEPORTER_M),
+                                AutocompleteEntry("6100.4", LANG.CONSOLE_GRID_TELEPORTER_PENTAGRAM),
+                                AutocompleteEntry("6100.5", LANG.CONSOLE_GRID_TELEPORTER_CROSS),
+                                AutocompleteEntry("6100.6", LANG.CONSOLE_GRID_TELEPORTER_TRIANGLE),
+                                AutocompleteEntry("9000", LANG.CONSOLE_GRID_TRAP_DOOR),
+                                AutocompleteEntry("9000.1", LANG.CONSOLE_GRID_VOID_PORTAL),
+                                AutocompleteEntry("9100", LANG.CONSOLE_GRID_CRAWLSPACE),
+                                AutocompleteEntry("9100.1", LANG.CONSOLE_GRID_CRAWLSPACE_GIDEON_DUNGEON),
+                                AutocompleteEntry("9100.2", LANG.CONSOLE_GRID_CRAWLSPACE_SECRET_SHOP),
+                                AutocompleteEntry("9100.3", LANG.CONSOLE_GRID_CRAWLSPACE_STARTING_ROOM),
+                                AutocompleteEntry("10000", LANG.CONSOLE_GRID_GRAVITY),
                             };
                             break;
                         }
@@ -871,7 +931,7 @@ struct ConsoleMega : ImGuiWindowObject {
                             for (auto& XMLPair : XMLPairs) {
                                 for (auto& node : std::get<0>(XMLPair)) {
                                     int id = node.first;
-                                    if (id == 0) // dont display NULL item and trinket
+                                    if ((id == 0) && (std::get<1>(XMLPair) != "p")) // dont display NULL item and trinket
                                       continue;
                                     std::string name = node.second["name"];
                                     auto& untranslated_name = node.second["untranslatedname"];
@@ -1186,7 +1246,7 @@ struct ConsoleMega : ImGuiWindowObject {
                         }
 
                     }
-
+                    end_of_autocompl_switchcase:
                     for (AutocompleteEntry entry : entries) {
                         entry.autocompleteText = cmdlets.front() + " " + entry.autocompleteText;
 
@@ -1247,6 +1307,14 @@ struct ConsoleMega : ImGuiWindowObject {
                 if (prev_history_pos != historyPos) {
                     std::string entry = historyPos ? history[historyPos - 1] : "";
                     entry.erase(std::remove(entry.begin(), entry.end(), '\n'), entry.end());
+
+                    std::string needle = "\\-|newline|-\\"; 
+                    size_t pos = 0;
+                    while ((pos = entry.find(needle, pos)) != std::string::npos) {
+                        entry.replace(pos, needle.length(), "\n"); 
+                        pos += 1; 
+                    }
+
                     autocompleteActive = true;
                     data->DeleteChars(0, data->BufTextLen);
                     data->InsertChars(0, entry.c_str());

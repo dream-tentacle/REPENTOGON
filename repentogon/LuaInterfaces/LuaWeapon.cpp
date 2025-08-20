@@ -11,6 +11,12 @@ LUA_FUNCTION(Lua_CreateWeapon) {
 	WeaponData* ud = new (lua_newuserdata(L, sizeof(WeaponData))) WeaponData;
 	int wepType = (int)luaL_checkinteger(L, 1);
 	Entity* ent = lua::GetLuabridgeUserdata<Entity*>(L, 2, lua::Metatables::ENTITY, "Entity");
+
+	if (!(WEAPON_NULL <= wepType && wepType < NUM_WEAPON_TYPES))
+	{
+		return luaL_argerror(L, 1, "Invalid WeaponType");
+	}
+
 	ud->weapon = Isaac::CreateWeapon((WeaponType)wepType, ent);
 	luaL_setmetatable(L, lua::metatables::WeaponMT);
 	return 1;
@@ -177,6 +183,12 @@ LUA_FUNCTION(Lua_WeaponSetHeadLockTime) {
 	return 0;
 }
 
+LUA_FUNCTION(Lua_WeaponGetMainEntity) {
+	Weapon* weapon = WeaponData::GetWeaponFromLua(L, 1);
+	lua::luabridge::UserdataPtr::push(L, weapon->GetMainEntity(), lua::GetMetatableKey(lua::Metatables::ENTITY));
+	return 1;
+}
+
 static void RegisterWeapon(lua_State* L) {
 	lua::RegisterGlobalClassFunction(L, lua::GlobalClasses::Isaac, "CreateWeapon", Lua_CreateWeapon);
 	lua::RegisterGlobalClassFunction(L, lua::GlobalClasses::Isaac, "DestroyWeapon", Lua_DestoryWeapon);
@@ -201,6 +213,7 @@ static void RegisterWeapon(lua_State* L) {
 		{ "IsItemAnimFinished", Lua_WeaponIsItemAnimFinished },
 		{ "ClearItemAnim", Lua_WeaponClearItemAnim },
 		{ "SetHeadLockTime", Lua_WeaponSetHeadLockTime },
+		{ "GetMainEntity", Lua_WeaponGetMainEntity },
 		{ NULL, NULL }
 	};
 

@@ -87,8 +87,8 @@ ___
 
 ___
 ### GetItemPool () {: aria-label='Functions' }
-#### [ItemPoolType](ItemPoolType.md) PoolType GetItemPool ( int Seed, boolean Raw ) {: .copyable aria-label='Functions' }
-Retrieves the [ItemPoolType](ItemPoolType.md) the game would use to generate random collectibles in the current room. Unlike [ItemPool.GetPoolForRoom()](https://wofsauge.github.io/IsaacDocs/rep/ItemPool.html#getpoolforroom), this takes into account the pool set using [SetItemPool()](Room.md#setitempool), and runs the game's pool selection code, which handles unique cases (ex. Boss Room + Used Satanic Bible = Devil Pool).
+#### [ItemPoolType](https://wofsauge.github.io/IsaacDocs/rep/enums/ItemPoolType.html) PoolType GetItemPool ( int Seed, boolean Raw ) {: .copyable aria-label='Functions' }
+Retrieves the [ItemPoolType](https://wofsauge.github.io/IsaacDocs/rep/enums/ItemPoolType.html) the game would use to generate random collectibles in the current room. Unlike [ItemPool.GetPoolForRoom()](https://wofsauge.github.io/IsaacDocs/rep/ItemPool.html#getpoolforroom), this takes into account the pool set using [SetItemPool()](Room.md#setitempool), and runs the game's pool selection code, which handles unique cases (ex. Boss Room + Used Satanic Bible = Devil Pool).
 
 If `Raw` is set to `true` and the pool is set to `POOL_NULL` then `POOL_NULL` will be returned, instead of running the game's pool selection code.
 
@@ -162,6 +162,11 @@ ___
 *Immediately* removes the GridEntity at the given index. This means grids can be properly removed and immediately replaced, *without* the need to call Room:Update.
 
 ___
+### SaveState () {: aria-label='Functions' }
+#### void SaveState ( ) {: .copyable aria-label='Functions' }
+Saves the current state of the room
+
+___
 ### SetBackdropType () {: aria-label='Functions' }
 #### void SetBackdropType ( [BackdropType](https://wofsauge.github.io/IsaacDocs/rep/enums/BackdropType.html), int Unknown ) {: .copyable aria-label='Functions' }
 This function will not work if the Unknown integer is passed as `0`.
@@ -174,7 +179,7 @@ ___
 
 ___
 ### SetItemPool () {: aria-label='Functions' }
-#### void SetItemPool ( [ItemPoolType](ItemPoolType.md) PoolType ) {: .copyable aria-label='Functions' }
+#### void SetItemPool ( [ItemPoolType](https://wofsauge.github.io/IsaacDocs/rep/enums/ItemPoolType.html) PoolType ) {: .copyable aria-label='Functions' }
 Sets the pool to use when the game needs to generate random collectibles in the current room. This takes priority over the game's regular pool selection code. Can be set to `ItemPoolType.POOL_NULL` to let the game handle pool selection. This is reset every room transition.
 
 ___

@@ -71,7 +71,7 @@ HOOK_METHOD(Console, Print, (const std::string& text, unsigned int color, unsign
     }
 
     // Change Repentance into REPENTOGON in the console
-    if (text.rfind("Repentance Console\n", 0) == 0) {
+    if (text.rfind("Repentance+ Console\n", 0) == 0) {
         super("REPENTOGON Console\n", color, fadeTime);
         return;
     }
@@ -145,6 +145,41 @@ HOOK_METHOD(Console, RunCommand, (std::string& in, std::string* out, Entity_Play
         REPENTOGONFileMap::GenerateMap();
         return super(in,out,player);
     };
+
+    /*
+    if ((in == "forceimport") || (in.rfind("forceimport ", 0) == 0)) {
+        std::vector<std::string> cmdlets = ParseCommand(in, 2);
+        unsigned int slot = 0;
+        if (cmdlets.size() > 1) {
+            slot = stoi(cmdlets[1]);
+        };
+        SaveImportHelper::FORCEIMPORT_ERRORCODE code=saveimport.ForceImport(slot);
+        const char* error_text = "";
+        switch (code) {
+        case SaveImportHelper::FORCEIMPORT_ERRORCODE::BAD_MENU:
+            error_text = "Not on the save select screen!";
+            break;
+        case SaveImportHelper::FORCEIMPORT_ERRORCODE::BAD_SLOT:
+            error_text = "Invalid save slot id!";
+            break;
+        case SaveImportHelper::FORCEIMPORT_ERRORCODE::STEAMCLOUD_UNSUPPORTED:
+            error_text = "Steam Cloud saves are not *yet* supported, sorry...";
+            break;
+        };
+        if (code != SaveImportHelper::FORCEIMPORT_ERRORCODE::SUCCESS) {
+            this->PrintError(error_text);
+            return;
+        };
+        std::string output = "Performed forced import of save file "+to_string(slot)+" from previous DLC\n";  //todo: actual dlc name
+        res.append(output);
+        if (out == nullptr)
+            this->Print(res.c_str(), Console::Color::WHITE, 0x96U);
+        else
+            out->append(res);
+        g_MenuManager->GetMenuSave()->Reset();
+        return;
+    };
+    */
 
     if ((in == "reloadshaders") || (in.rfind("reloadshaders ", 0) == 0)) {
         for (auto & [ key, value ] : custom_shaders)

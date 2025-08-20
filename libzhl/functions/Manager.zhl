@@ -15,10 +15,7 @@ __thiscall void Manager::LoadChallenges(char *xmlpath, bool ismod);
 
 
 "68(????????)68????????8d8424":
-reference std_string g_SaveDataPath;
-
-"a2(????????)75??6a00":
-reference bool g_isfullscreenrendering;
+reference char g_SaveDataPath;
 
 "8915(????????)a3":
 reference unsigned int g_WindowSizeX;
@@ -72,6 +69,12 @@ __thiscall void Manager::SetSaveSlot(unsigned int slot);
 "558bec518b55??8b0d????????83fa1a":
 __thiscall void Manager::ShowCutscene(uint32_t cutsceneID, bool shouldCleanup, unsigned int UNKNOWN);
 
+"5668????????8bf1ff15????????83c40483380074":
+__thiscall bool Manager::IsSteamCloudEnabled();
+
+"558bec6aff68????????64a1????????50535657a1????????33c5508d45??64a3????????8bd98db3":
+__thiscall void Manager::destructor();
+
 struct Manager depends (Seeds, GameState, StringTable, PersistentGameData, NightmareScene, UnknownGameStartStruct, ModManager, ReferenceCounter_ImageBase, Cutscene, OptionsConfig, AchievementOverlay, SoundEffects, ItemConfig, EntityConfig, ANM2, Font, ChallengeParam, Music, NetplayManager, DailyChallenge) { {{
 	inline int GetState() { return this->_state; }
 	inline PersistentGameData* GetPersistentGameData() { return &this->_persistentGameData; }
@@ -95,39 +98,38 @@ struct Manager depends (Seeds, GameState, StringTable, PersistentGameData, Night
 	uint32_t _currentSaveSlot : 0x10;
 	PersistentGameData _persistentGameData : 0x14;
 	GameState _gamestate : 0xfa4;
-	Cutscene _cutsceneManager : 0x20d10;
-	NightmareScene _nightmareScene : 0x21560;
-	AchievementOverlay _achievementOverlay : 0x21b54;
-	Music _musicmanager : 0x29ec0;
-	SoundEffects _sfxManager : 0x2a228;
-	OptionsConfig _optionsConfig : 0x2a240;
-	ItemConfig _itemConfig : 0x2a2f8;
-	EntityConfig _entityConfig : 0x2a430;
-	ModManager _modManager : 0x2a480;
-	StringTable _stringTable : 0x4a6e0;
-	unsigned int _framecount : 0x4a97c;
-	bool _isConsoleEnabled : 0x4a991;
-	ANM2 _buttonsSprite : 0x4a9a4;
-	Font _font1_TeamMeatEx10 : 0x4aacc;
-	Font _font2_TeamMeatEx12 : 0x4ab18;
-	Font _font3_TeamMeatEx16 : 0x4ab64;
-	Font _font4_terminus : 0x4abb0;
-	Font _font5_terminus8 : 0x4abfc;
-	Font _font6_PFTempestaSevenCondensed : 0x4ac48;
-	Font _font7_Upheaval : 0x4ac94;
-	Font _font8_LuaMiniOutlined : 0x4ace0;
-	Font _font9_PFTempestaSevenCondensedAgain : 0x4ad2c;
-	bool _starting : 0x4add4;
-	bool _rerunAvailable : 0x4add5;
-	bool _startingFromRerun : 0x4add6;
-	Seeds _startSeeds : 0x4ade0;
-	bool _debugStart : 0x4ae40;
-	DailyChallenge _dailyChallenge : 0x4ae64;
-	bool _networkPlay : 0x4af18;
-	ANM2 _cursorSprite : 0x4af4c;
-	NetplayManager _netplayManager : 0x4b080;
-	
-} : 0x4cdfc;
+	Cutscene _cutsceneManager : 0x20c48;
+	NightmareScene _nightmareScene : 0x21498;
+	AchievementOverlay _achievementOverlay : 0x21a8c;
+	Music _musicmanager : 0x29df8;
+	SoundEffects _sfxManager : 0x2a160;
+	OptionsConfig _optionsConfig : 0x2a178;
+	ItemConfig _itemConfig : 0x2a234;
+	EntityConfig _entityConfig : 0x2a36c;
+	ModManager _modManager : 0x2a3bc;
+	StringTable _stringTable : 0x4a61c;
+	unsigned int _framecount : 0x4a8b8;
+	bool _isConsoleEnabled : 0x4a8cd;
+	ANM2 _buttonsSprite : 0x4a8e0;
+	Font _font1_TeamMeatEx10 : 0x4aa08;
+	Font _font2_TeamMeatEx12 : 0x4aa54;
+	Font _font3_TeamMeatEx16 : 0x4aaa0;
+	Font _font4_terminus : 0x4aaec;
+	Font _font5_terminus8 : 0x4ab38;
+	Font _font6_PFTempestaSevenCondensed : 0x4ab84;
+	Font _font7_Upheaval : 0x4abd0;
+	Font _font8_LuaMiniOutlined : 0x4ac1c;
+	Font _font9_PFTempestaSevenCondensedAgain : 0x4ac68;
+	bool _starting : 0x4ad10;
+	bool _rerunAvailable : 0x4ad11;
+	bool _startingFromRerun : 0x4ad12;
+	Seeds _startSeeds : 0x4ad1c;
+	bool _debugStart : 0x4ad7c;
+	DailyChallenge _dailyChallenge : 0x4ada0;
+	bool _networkPlay : 0x4ae54;
+	ANM2 _cursorSprite : 0x4ae88;
+	NetplayManager _netplayManager : 0x4afb8;
+} : 0x4cd68;
 
 "a1(????????)8b80????????83e800":
 reference Manager *g_Manager;

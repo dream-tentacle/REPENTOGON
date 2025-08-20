@@ -3,6 +3,9 @@
 #include "XMLData.h"
 #include "LuaCore.h"
 #include "AchievementsStuff.h"
+#include "ASMDefinition.h"
+#include "ASMPatches.h"
+#include "ASMPatcher.hpp"
 #include "PlayerFeatures.h"
 #include "../ImGuiFeatures/LogViewer.h"
 
@@ -94,18 +97,48 @@ HOOK_METHOD_PRIORITY(Entity_Player, GetHealthLimit, 100, (bool keeper) -> int) {
 
 bool IsCharacterUnlockedRgon(const int playerType) {
 	XMLAttributes att = XMLStuff.PlayerData->GetNodeById(playerType);
-	std::string const& achievement = att["achievement"];
-
+	const std::string& achievement = att["achievement"];
 	if (!achievement.empty()) {
-		char* end = NULL;
-		long id = strtol(achievement.c_str(), &end, 0);
-		if (id == 0 && end == achievement.c_str()) {
-			id = GetAchievementIdByName(achievement);
-		}
-		return g_Manager->GetPersistentGameData()->Unlocked(id);
+		return IsAchievementUnlockedByXmlString(achievement);
 	}
 	return true;
 }
+
+bool IsCharacterHiddenByAchievementRgon(const int playerType) {
+	if (playerType < NUM_PLAYER_TYPES) {
+		return false;
+	}
+	EntityConfig_Player* player = g_Manager->GetEntityConfig()->GetPlayer(playerType);
+	if (!player->_bSkinParentName.empty()) {
+		// This is a tainted character. Need to check their non-tainted counterpart.
+		for (uint32_t i = NUM_PLAYER_TYPES; i < g_Manager->GetEntityConfig()->GetPlayers()->size(); i++) {
+			EntityConfig_Player* otherPlayer = g_Manager->GetEntityConfig()->GetPlayer(i);
+			if (otherPlayer && otherPlayer->_id != player->_id && otherPlayer->_name == player->_bSkinParentName && otherPlayer->_bSkinParentName.empty()) {
+				return IsCharacterHiddenByAchievementRgon(otherPlayer->_id);
+			}
+		}
+		return false;
+	}
+	XMLAttributes att = XMLStuff.PlayerData->GetNodeById(playerType);
+	const std::string& achievement = att["hideachievement"];
+	if (!achievement.empty()) {
+		return !IsAchievementUnlockedByXmlString(att["hideachievement"]);
+	}
+	return false;
+}
+
+HOOK_METHOD(ModManager, LoadConfigs, () -> void) {
+	super();
+
+	// Players with the "hideachievement" attribute (hides them from menus until an achievement is earned) cannot also be ""hidden"".
+	// They mean different things (for example, The Forgotten never has the ""hidden"" attribute).
+	for (EntityConfig_Player& player : *g_Manager->GetEntityConfig()->GetPlayers()) {
+		if (player._hidden && !XMLStuff.PlayerData->GetNodeById(player._id)["hideachievement"].empty()) {
+			player._hidden = false;
+		}
+	}
+}
+
 
 HOOK_METHOD(ModManager, RenderCustomCharacterPortraits, (int id, Vector* pos, ColorMod* color, Vector* scale) -> void) {
 	XMLAttributes playerXML = XMLStuff.PlayerData->GetNodeById(id);
@@ -174,16 +207,50 @@ HOOK_STATIC(ModManager, RenderCustomCharacterMenu, (int CharacterId, Vector* Ren
 		g_MenuManager->GetMenuCharacter()->IsCharacterUnlocked = false;
 }
 
+HOOK_METHOD(Menu_Character, UpdateRotations, () -> void) {
+
+	super();
+
+	// The tainted menu is very naive and hides itself if... the page swap sprite is invisible.
+	// If no modded tainted characters are locked, hide the sprite.
+	bool hideTaintedMenu = true;
+
+	for (unsigned int i = PLAYER_ISAAC_B; i < g_Manager->GetPlayerConfig()->size(); ++i) {
+		EntityConfig_Player* player = &g_Manager->GetPlayerConfig()->at(i);
+
+		if (i < NUM_PLAYER_TYPES) {
+			if (player->_hidden) {
+				continue;
+			}
+
+			if ((player->_achievement == -1) || ((player->_achievement >= 0 && g_Manager->GetPersistentGameData()->Unlocked(player->_achievement)) &&
+				((player->_id != PLAYER_EDEN_B) || g_Manager->GetPersistentGameData()->GetEventCounter(21) > 0))) {
+				hideTaintedMenu = false;
+			}
+		}
+		else {
+			if (player->_hidden || player->_bSkinParentName.empty()) {
+				continue;
+			}
+			if (IsCharacterUnlockedRgon(player->_id)) {
+				hideTaintedMenu = false;
+			}
+		}
+	}
+	if (hideTaintedMenu)
+		this->_PageSwapWidgetSprite._color._tint[3] = 0.0f;	
+};
+
 HOOK_METHOD(Menu_Character, SelectRandomChar, () -> void) {
 	std::vector<std::pair<int, EntityConfig_Player>> allowedCharacters;
 	std::vector<std::string> bSkinParents;
 	// These hardcoded arrays should only stick around until we have the properties for these actually figured out.
-	int bannedIds[7] = { 11, 12, 17, 20, 38, 39, 40 }; // Until we have character configs fully mapped out, this is a hardcoded list of banned ID's.
-	int hiddenIds[4] = { 4, 10, 14, 16 }; // Blue Baby, Keeper, The Lost and The Forgotten will be hidden when not unlocked, and this needs to be accounted for.
-	int hiddenTainteds[4] = { 25, 31, 33, 35 }; // Their tainted forms, too
+	int bannedIds[7] = { PLAYER_LAZARUS2, PLAYER_BLACKJUDAS, PLAYER_THESOUL, PLAYER_ESAU, PLAYER_LAZARUS2_B, PLAYER_JACOB2_B, PLAYER_THESOUL_B }; // Until we have character configs fully mapped out, this is a hardcoded list of banned ID's.
+	int hiddenIds[4] = { PLAYER_BLUEBABY, PLAYER_THELOST, PLAYER_KEEPER, PLAYER_THEFORGOTTEN }; // Will be hidden when not unlocked, so this needs to be accounted for.
+	int hiddenTainteds[4] = { PLAYER_BLUEBABY_B, PLAYER_THELOST_B, PLAYER_KEEPER_B, PLAYER_THEFORGOTTEN_B }; // Their tainted forms, too
 
 	// First, for modded characters, build a list of all bSkinParents
-	for (unsigned int i = 41; i < g_Manager->GetPlayerConfig()->size(); ++i) {
+	for (unsigned int i = NUM_PLAYER_TYPES; i < g_Manager->GetPlayerConfig()->size(); ++i) {
 		XMLAttributes playerXML = XMLStuff.PlayerData->GetNodeById(g_Manager->GetPlayerConfig()->at(i)._id);
 		if (!playerXML["bskinparent"].empty()) {
 			logViewer.AddLog("[REPENTOGON]", "Pushing back %s as a b-skin parent\n", playerXML["bskinparent"].c_str());
@@ -197,11 +264,11 @@ HOOK_METHOD(Menu_Character, SelectRandomChar, () -> void) {
 		std::string name = player.GetDisplayName(nullptr);
 
 
-		if (player._id < 41) { // Vanilla character handling
+		if (player._id < NUM_PLAYER_TYPES) { // Vanilla character handling
 			int achievement = *player.GetAchievement();
 
 			// If a character ID isn't valid for the current character menu, skip
-			if (this->GetSelectedCharacterMenu() == 1 && player._id <= 20 || this->GetSelectedCharacterMenu() == 0 && player._id > 20) { // TODO probably an enum for this, 0 = normal 1 = tainted
+			if (this->GetSelectedCharacterMenu() == 1 && player._id <= PLAYER_ESAU || this->GetSelectedCharacterMenu() == 0 && player._id > PLAYER_ESAU) { // TODO probably an enum for this, 0 = normal 1 = tainted
 				continue;
 			}
 
@@ -225,7 +292,7 @@ HOOK_METHOD(Menu_Character, SelectRandomChar, () -> void) {
 
 			// If the character is unlocked, and we have enough Eden tokens if we're Eden, add as a valid option
 			if (achievement < 0 || g_Manager->GetPersistentGameData()->Unlocked(achievement) &&
-				(player._id != 9 && player._id != 30 || g_Manager->GetPersistentGameData()->GetEventCounter(21))) { //TODO: enums, but this is eden and tainted eden, and eden tokens
+				(player._id != PLAYER_EDEN && player._id != PLAYER_EDEN_B || g_Manager->GetPersistentGameData()->GetEventCounter(21))) { //TODO: enum for eden tokens
 				logViewer.AddLog("[REPENTOGON]", "Adding %d (%s) as an option at offset %d\n", player._id, name.c_str(), offset);
 				allowedCharacters.push_back(std::pair<int, EntityConfig_Player>(offset, player));
 			}
@@ -240,17 +307,22 @@ HOOK_METHOD(Menu_Character, SelectRandomChar, () -> void) {
 				continue;
 			}
 
-
-			// This is a locked modded character, increment offset and skip
-			if (!IsCharacterUnlockedRgon(player._id)) {
-				logViewer.AddLog("[REPENTOGON]", "Skipping %d (%s) as a locked modded character at offset %d\n", player._id, name.c_str(), offset);
-				offset++;
+			// This is a hidden modded character, skip
+			if (player._hidden) {
+				logViewer.AddLog("[REPENTOGON]", "Skipping %d (%s) as a HIDDEN modded character at offset %d\n", player._id, name.c_str(), offset);
 				continue;
 			}
 
-			// This is a hidden modded character, skip
-			if (!playerXML["hidden"].empty()) {
-				logViewer.AddLog("[REPENTOGON]", "Skipping %d (%s) as a HIDDEN modded character at offset %d\n", player._id, name.c_str(), offset);
+			// This is a modded character hidden from the menu by an achievement, skip
+			if (IsCharacterHiddenByAchievementRgon(player._id)) {
+				logViewer.AddLog("[REPENTOGON]", "Skipping %d (%s) as a modded character \"hidden\" by an achievement at offset %d\n", player._id, name.c_str(), offset);
+				continue;
+			}
+
+			// This is a visible, but locked modded character, increment offset and skip
+			if (!IsCharacterUnlockedRgon(player._id)) {
+				logViewer.AddLog("[REPENTOGON]", "Skipping %d (%s) as a locked modded character at offset %d\n", player._id, name.c_str(), offset);
+				offset++;
 				continue;
 			}
 
@@ -281,4 +353,29 @@ HOOK_METHOD(Menu_Character, SelectRandomChar, () -> void) {
 	this->_randomRotationAmount = chosenCharacter.first + this->GetNumCharacters() * 2 + this->GetNumCharacters();
 	this->_randomRotationVelocity = (360.0f / this->GetNumCharacters()) / 30.0f;
 
+}
+
+// In Menu_Character::Reset, the game reconstructs the set of characters that should appear on the main menu.
+// Normally the only condition to not include a modded character on the menu would be for it to be hidden.
+// This patch introduces an additional check to see if it should be "hidden" until some achievement is unlocked.
+bool __stdcall HideModdedCharacterInMenu(EntityConfig_Player* playerConf) {
+	return playerConf->_hidden || IsCharacterHiddenByAchievementRgon(playerConf->_id);
+}
+void PatchModdedCharacterHiddenByAchievementInMenu() {
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::HideModdedCharacterByAchievement);
+
+	const int jumpOffset = 0x9 + *(uint8_t*)((char*)addr + 0x8);
+
+	printf("[REPENTOGON] Patching Menu_Character::Reset to support hidden-until-locked modded characters at %p\n", addr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.Push(ASMPatch::Registers::EAX)  // EntityConfig_Player*
+		.AddInternalCall(HideModdedCharacterInMenu)
+		.AddBytes("\x84\xC0") // test al, al
+		.RestoreRegisters(savedRegisters)
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)addr + jumpOffset)  // Jump for true
+		.AddRelativeJump((char*)addr + 0x9);  // Jump for false
+	sASMPatcher.PatchAt(addr, &patch);
 }

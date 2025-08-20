@@ -1,3 +1,4 @@
+#include "ASMDefinition.h"
 #include "ASMPatcher.hpp"
 #include "ASMTweaks.h"
 #include "Log.h"
@@ -8,6 +9,10 @@
 namespace ASMPatches {
 	static void __stdcall __TearDetonatorPatch(EntityList_EL*);
 	static bool __stdcall __IsLeadeboardEntryInvalid(int schwagBonus, int timePenalty, int encodedGameVersion, int encodedGameVersionFromScoreSheet);
+	static bool __stdcall __DisallowAchievements();
+
+	static bool __stdcall __ExecuteGameExit();
+	static unsigned int __stdcall __SetLeaderboardGoalOffset(Leaderboard* leaderboard);
 
 	bool FixGodheadEntityPartition() {
 		SigScan signature("6aff56f3??????????????50f3??????????????e8????????8b");
@@ -86,30 +91,29 @@ namespace ASMPatches {
 	};
 
 	bool SkipArchiveChecksums() {
-		SigScan loopsig("8b40??8985????????0f1f44??00");	//0x00e19252 in ghidra for 1.9.7.7, beginning of an other "do-while" block
-		SigScan ifchecksig("74??ffb5????????ff77");
-		ASMPatch ifpatch;
+		SigScan loop_sig("8bc83d00020000");						//first line in the outer "do-while" block (loadarchivefile)
+		SigScan if_check_sig("74??ffb5????????ff77");			//branch condition for checksum comparsion
+		SigScan loop_end_sig("8b85????????8bbd????????3b70");	//immediately outside the while loop, a few lines above if check
+		ASMPatch if_patch;
 		ASMPatch patch;
 
-		if (!loopsig.Scan()) {
-			return false;
-		};
-		if (!ifchecksig.Scan()) {
+		if ( !( loop_sig.Scan() && if_check_sig.Scan() && loop_end_sig.Scan() ) ) {
+			printf("Failed to find -skipchecksum addresses!\nloop: %p, loop_end: %p, if_check: %p\n",loop_sig.GetAddress(),loop_end_sig.GetAddress(),if_check_sig.GetAddress());
 			return false;
 		};
 
-		void* startptr = loopsig.GetAddress();
-		void* endptr = (void*)((char*)startptr + 0x99);		//0x00e192eb in ghidra for 1.9.7.7, the label slightly above the if check patch pos
-		void* ifcheck = ifchecksig.GetAddress();
+		void* start_ptr = loop_sig.GetAddress();
+		void* end_ptr = loop_end_sig.GetAddress();
+		void* if_check = if_check_sig.GetAddress();
 
-		ifpatch.AddBytes("\xEB");	//swap to uncond jump
-		patch.AddRelativeJump(endptr);
+		if_patch.AddBytes("\xEB");	//swap to uncond jump
+		patch.AddRelativeJump(end_ptr);
 
 		for (int i = 1; i < __argc; i++) {
 			char* arg = __argv[i];
 			if (strcmp("-skipchecksum", arg) == 0) {
-				sASMPatcher.FlatPatch(startptr,&patch);
-				sASMPatcher.FlatPatch(ifcheck, &ifpatch);
+				sASMPatcher.FlatPatch(start_ptr,&patch);
+				sASMPatcher.FlatPatch(if_check, &if_patch);
 				break;
 			};
 		};
@@ -249,4 +253,133 @@ namespace ASMPatches {
 		patch.AddRelativeJump((char*)addr + 0x10);
 		sASMPatcher.PatchAt(addr, &patch);
 	}
+
+	static bool __stdcall __DisallowAchievements() {
+		if (((g_Manager->GetState() != 2 || g_Game == nullptr) || (g_Game->GetDailyChallenge()._id == 0 && !g_Game->IsDebug()))) {
+			return true;
+		}
+		return false;
+	}
+
+	 bool SkipWombAchievementBlock() {
+		ASMPatch patch;
+
+		SigScan signature("807e??0075??837e??0275??a1");
+		if (!signature.Scan()) {
+			return false;
+		}
+
+		void* addr = signature.GetAddress();
+		printf("[REPENTOGON] Patching Manager::AchievementUnlocksDisallowed at %p\n", addr);
+
+		patch.AddInternalCall(__DisallowAchievements)
+			.AddBytes("\x84\xC0") // test al, al
+			.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)addr + 0x27)
+			.AddRelativeJump((char*)addr + 0x31);
+		
+		sASMPatcher.PatchAt(addr, &patch);
+
+		return true;
+	}
+
+	 static bool __stdcall __ExecuteGameExit() {
+		 if (repentogonOptions.disableExitPrompt) {
+			 printf("[REPENTOGON] Executing game exit\n");
+			 Isaac::ConfirmGameExit();
+
+			 return true;
+		 }
+		 return false;
+	 }
+
+	 void DisableExitPrompt() {
+		 void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::DisableExitPrompt);
+
+		 printf("[REPENTOGON] Patching Menu_Title::Update for exit prompt patch at %p\n", addr);
+
+		 ASMPatch::SavedRegisters reg(ASMPatch::SavedRegisters::GP_REGISTERS_STACKLESS, true);
+		 ASMPatch patch;
+
+		 patch.PreserveRegisters(reg)
+			 .AddInternalCall(__ExecuteGameExit)
+			 .AddBytes("\x84\xC0") // TEST AL, AL
+			 .RestoreRegisters(reg)
+			 .AddConditionalRelativeJump(ASMPatcher::CondJumps::JNZ, (char*)addr + 0x98) // Jump to return if true
+			 .AddBytes(ByteBuffer().AddAny((char*)addr, 0xA))  // Restore the bytes we overwrote
+			 .AddRelativeJump((char*)addr + 0xA);  // Skip to original behaviour
+
+		 sASMPatcher.PatchAt(addr, &patch);
+
+	 }
+
+	 //LeaderboardGoalPatch
+	 static unsigned int __stdcall __SetLeaderboardGoalOffset(Leaderboard* leaderboard) {
+		ChallengeParam& challengeParams = leaderboard->_dailyChallenge._params;
+		bool isCathedralPath = challengeParams._pathType == 1;
+
+		unsigned int offset = 0;
+
+		if (challengeParams._difficulty == 1) {
+			offset = 10;
+		}
+
+		if (!challengeParams._isMegaSatan) {
+			if (challengeParams._pathType == 3) {
+				offset += 9;
+			}
+			else {
+				switch ((LevelStage)challengeParams._endStage) {
+				case STAGE3_2:
+					break;
+				case STAGE4_2:
+					offset += (challengeParams._pathType == 2) ? 8 : 1;
+					break;
+				case STAGE5:
+					offset += 3 - (unsigned int)(!isCathedralPath);
+					break;
+				case STAGE6:
+					offset += 5 - (unsigned int)(!isCathedralPath);
+					break;
+				case STAGE7:
+					offset += 7;
+					break;
+				case STAGE8:
+					offset += 9;
+					break;
+				default:
+					offset = 0;
+				}
+			}
+		}
+		else {
+			offset += 6;
+		}
+		return offset;
+	 }
+
+	 void PatchLeaderboardGoalSprite() {
+		 void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::LeaderboardGoalPatch);
+
+		 SigScan goalExitScanner("68????????8d8e????????e8????????85c075??68????????68????????6a01e8????????83c40c8dbe");
+		 if (!goalExitScanner.Scan()) {
+			 ZHL::Log("[ERROR] Unable to find exit signature in LeaderboardGoalPatch for max coins\n");
+			 return;
+		 }
+		 void* goalExitAddr = goalExitScanner.GetAddress();
+
+		 printf("[REPENTOGON] Patching Leaderboard::render_leaderboard for leaderboard goal patch at %p\n", addr);
+
+		 ASMPatch::SavedRegisters reg(ASMPatch::SavedRegisters::GP_REGISTERS_STACKLESS & ~ASMPatch::SavedRegisters::Registers::EDI, true);
+		 ASMPatch patch;
+
+		 patch.PreserveRegisters(reg)
+			 .Push(ASMPatch::Registers::ESI)
+			 .AddInternalCall(__SetLeaderboardGoalOffset)
+			 .CopyRegister(ASMPatch::Registers::EDI, ASMPatch::Registers::EAX)
+			 .RestoreRegisters(reg)
+			 .AddRelativeJump(((char*)goalExitAddr));
+
+		 sASMPatcher.PatchAt(addr, &patch);
+	 }
+
 }

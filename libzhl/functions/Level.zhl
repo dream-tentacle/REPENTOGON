@@ -10,6 +10,9 @@ __thiscall void Level::Update();
 "558bec6aff68????????64a1????????5083ec2c535657a1????????33c5508d45??64a3????????8bd98b45":
 __thiscall void Level::ChangeRoom(int targetRoomIDX, int dimension);
 
+"558bec83e4f881ece8000000":
+__thiscall void Level::swap_rooms(int leftIdx, int rightIdx);
+
 "558bec6aff68????????64a1????????5083ec185657a1????????33c5508d45??64a3????????8bf164a1":
 __thiscall bool Level::TryInitializeExtraBossRoom(unsigned int seed);
 
@@ -31,14 +34,14 @@ __thiscall std_string Level::GetName();
 "538bdc83ec0883e4f883c404558b6b04896c24048bec6aff68????????64a100000000505383ec70a1????????33c58945ec5657508d45f464a3000000008bc28945888bf9":
 cleanup void GetLevelName(std_string* result<ecx>, uint32_t levelStage<edx>, uint32_t stageType, uint32_t curseMask, uint32_t unk, uint32_t unk2, bool unk3);
 
-"558bec83ec0c53568b35":
+"558bec83ec148b15":
 __thiscall void Level::SetNextStage();
 
 "558bec5153568b35????????578b7d":
 static bool Level::IsStageAvailable(int LevelStage, int StageType);
 
 "558bec83ec1c53568b75??578bf9":
-bool Level::place_room(LevelGenerator_Room* slot, RoomConfig_Room* data, uint32_t seed, uint32_t unk);
+__thiscall bool Level::place_room(LevelGenerator_Room* slot, RoomConfig_Room* data, uint32_t seed, uint32_t unk);
 
 "558bec515356578b3d????????8bd9":
 __thiscall bool Level::IsNextStageAvailable();
@@ -49,14 +52,26 @@ __thiscall bool Level::IsAltPath();
 "558bec6aff68????????64a1????????5083ec2c535657a1????????33c5508d45??64a3????????8bf9897d??648b15":
 __thiscall void Level::InitializeDevilAngelRoom(bool ForceAngel, bool ForceDevil);
 
+"558bec6aff68????????64a1????????505657a1????????33c5508d45??64a3????????8bf164a1":
+__thiscall RoomDescriptor* Level::GetRoomByIdx(int32_t idx, int32_t dimension);
+
 "558bec6aff68????????64a1????????5083ec24535657a1????????33c5508d45??64a3????????8bd9f30f7e05":
 __thiscall int Level::GetRandomRoomIndex(bool IAmErrorRoom, unsigned int Seed);
 
-"538bdc83ec0883e4f883c404558b6b??896c24??8bec6aff68????????64a1????????505381ec48040000":
+"538bdc83ec0883e4f883c404558b6b??896c24??8bec6aff68????????64a1????????505381ec50040000":
 __thiscall void Level::generate_dungeon(RNG * RNG);
+
+"558bec6aff68????????64a1????????5083ec68a1????????33c58945??535657508d45??64a3????????8bd98b55":
+__thiscall bool Level::place_rooms_backwards(LevelGenerator* levelGen, BackwardsStageDesc* backwardsStage, uint32_t stage, uint32_t minDifficulty, uint32_t maxDifficulty);
 
 "558bec83e4f883ec0c568bf18b86":
 __thiscall void Level::StartMamaMega(Vector * Position, Entity_Player* player);
+
+"558bec83e4f883ec0c5356578b7d??894c24":
+static RoomConfig_Room* Level::read_room_config(GameStateRoomConfig* room, std_deque_RoomConfigRoom* deque);
+
+"558bec83e4f883ec148b55":
+static void Level::write_room_config(RoomConfig_Room* roomConfig, GameStateRoomConfig* gameStateRoom, std_deque_RoomConfigRoom* deque);
 
 struct Level {
 	uint32_t _stage : 0x0;

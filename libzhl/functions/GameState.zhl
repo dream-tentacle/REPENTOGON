@@ -1,4 +1,4 @@
-"538bdc83ec0883e4f883c404558b6b??896c24??8bec6aff68????????64a1????????505381ecf8000000a1????????33c58945??5657508d45??64a3????????8bf989bd????????b831000000":
+"538bdc83ec0883e4f883c404558b6b??896c24??8bec6aff68????????64a1????????505381ecf8000000a1????????33c58945??5657508d45??64a3????????8bf989bd????????b835000000":
 __thiscall void GameState::Clear();
 
 "558bec6aff68????????64a1????????5081ec60040000":
@@ -19,17 +19,22 @@ __thiscall void GameState::Delete();
 "538b1d????????56578b3d????????8bf168????????ffd7":
 __thiscall void GameState::DeleteRerun();
 
-struct GameState depends (RoomDescriptor, GameStatePlayer, GameStateItemPool, Seeds){
-    uint32_t _roomCount : 0x260;
-    RoomDescriptor _rooms[527] : 0x264;
-    uint32_t _playerCount : 0x19e34;
-    GameStatePlayer _players[8] : 0x19e38;
-    GameStatePlayer _esauJrStates[4] : 0x1cc18;
-    GameStateItemPool _itemPool : 0x1e308;
-    Seeds _seeds : 0x1e660;
-    uint32_t _checksum : 0x1fce0;
-    uint32_t _rerunChecksum : 0x1fce4;
-    std_string _cloudGameStatePath : 0x1fd30;
-    std_string _cloudRerunStatePath : 0x1fd48;
-    GameStateIO* _saveFile : 0x1fd60;
-} : 0x1fd64;
+struct GameState depends (RoomDescriptor, GameStateRoomConfig, GameStatePlayer, GameStateItemPool, GameStateBossPool, Seeds, BackwardsStageDesc) {
+    uint32_t _roomCount : 0x19c;
+    RoomDescriptor _rooms[527] : 0x1a0;
+    GameStateRoomConfig _roomConfigs[527] : 0x17c68;
+    uint32_t _playerCount : 0x19d70;
+    GameStatePlayer _players[8] : 0x19d74;
+    GameStatePlayer _esauJrStates[4] : 0x1cb54;
+    GameStateItemPool _itemPool : 0x1e244;
+    GameStateBossPool _bossPool : 0x1e4f8;
+    Seeds _seeds : 0x1e59c;
+    BackwardsStageDesc _backwardsStages[7] : 0x1e62c;
+    uint32_t _checksum : 0x1fc1c;
+    uint32_t _rerunChecksum : 0x1fc20;
+    std_string _localGameStatePath : 0x1fc24;
+    std_string _localRerunStatePath : 0x1fc3c;
+    std_string _cloudGameStatePath : 0x1fc6c;
+    std_string _cloudRerunStatePath : 0x1fc84;
+    GameStateIO* _saveFile : 0x1fc9c;
+} : 0x1fca0;

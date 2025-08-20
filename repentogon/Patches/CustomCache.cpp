@@ -5,8 +5,8 @@
 #include "HookSystem.h"
 #include "ASMPatches.h"
 #include "EntityPlus.h"
-#include "SigScan.h"
 #include "ASMPatcher.hpp"
+#include "ASMDefinition.h"
 
 
 // Max coins/keys/bombs is a global thing so no need to store it on any player.
@@ -31,8 +31,50 @@ int __stdcall GetMaxBombs() {
 	return MAX_BOMBS;
 }
 
+float GetVanillaStatMultiplier(Entity_Player* player) {
+	float mult = 1.0f + player->GetTrinketMultiplier(TRINKET_CRACKED_CROWN) * 0.2f;
+	if (player->_playerType == PLAYER_BETHANY_B) {
+		mult *= 0.75f;
+	}
+	return mult;
+}
 
-void UpdateMaxCoinsKeysBombs(const std::string& customcache, const double newMaxCoins) {
+double GetDefaultCustomCacheValue(Entity_Player* player, const std::string& customcache) {
+	if (customcache == "maxcoins" || customcache == "maxkeys" || customcache == "maxbombs") {
+		if (customcache == "maxcoins" && g_Game->_playerManager.FirstCollectibleOwner(COLLECTIBLE_DEEP_POCKETS, nullptr, true)) {
+			return 999;
+		}
+		return 99;
+	}
+	else if (customcache == "healthtype") {
+		EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+		if (playerPlus) {
+			playerPlus->disableHealthTypeModification = true;
+			double defaultHealthType = (double)player->GetHealthType();
+			playerPlus->disableHealthTypeModification = false;
+			return defaultHealthType;
+		}
+	}
+	else if (customcache == "tearscap") {
+		return 5.0;
+	}
+	else if (customcache == "statmultiplier") {
+		return GetVanillaStatMultiplier(player);
+	}
+
+	return 0;
+}
+
+double GetCustomCacheValue(Entity_Player* player, const std::string& customcache) {
+	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+
+	if (playerPlus && playerPlus->customCacheResults.find(customcache) != playerPlus->customCacheResults.end()) {
+		return playerPlus->customCacheResults[customcache];
+	}
+	return GetDefaultCustomCacheValue(player, customcache);
+}
+
+void UpdateMaxCoinsKeysBombs(const std::string& customcache, const double newMax) {
 	Entity_Player* player = g_Game->_playerManager.GetPlayer(0);
 
 	int* current = nullptr;
@@ -59,7 +101,7 @@ void UpdateMaxCoinsKeysBombs(const std::string& customcache, const double newMax
 		return;
 	}
 
-	*max = (int)std::clamp(newMaxCoins, 0.0, (double)INT_MAX);;
+	*max = (int)std::clamp(newMax, 0.0, (double)INT_MAX);;
 
 	const int numDigits = *max < 1 ? 1 : ((int)std::floor(std::log10(*max)) + 1);
 	if (numDigits > 9) {
@@ -153,7 +195,7 @@ void RunEvaluateCustomCacheCallback(Entity_Player* player, const std::string cus
 
 	const bool maxCoinsKeysBombs = customcache == "maxcoins" || customcache == "maxkeys" || customcache == "maxbombs";
 
-	double initialValue = 0.0;
+	double initialValue = GetDefaultCustomCacheValue(player, customcache);
 
 	if (maxCoinsKeysBombs) {
 		// Only run evaluations as player 1 for global stats like this.
@@ -169,26 +211,20 @@ void RunEvaluateCustomCacheCallback(Entity_Player* player, const std::string cus
 				}
 			}
 		}
-
-		if (customcache == "maxcoins" && g_Game->_playerManager.FirstCollectibleOwner(COLLECTIBLE_DEEP_POCKETS, nullptr, true)) {
-			initialValue = 999;
-		}
-		else {
-			initialValue = 99;
-		}
 	} else if (customcache == "familiarmultiplier") {
 		// Familiar multiplier has special treatment, and does not go through the usual callback.
 		// Still otherwise implemented as a customcache because it is "triggered" in the same ways.
 		// When this cache is triggered on the player, wipe the cached multipliers from all their
 		// familiars, indirectly triggering MC_EVALUATE_FAMILIAR_MULTIPLIER instead.
 		InvalidateCachedFamiliarMultipliers(player);
+		playerPlus->customCacheResults[customcache] = 0;
 		return;
-	} else if (customcache == "healthtype") {
-		playerPlus->disableHealthTypeModification = true;
-		initialValue = (double)player->GetHealthType();
-		playerPlus->disableHealthTypeModification = false;
 	}
 
+	double previousValue = initialValue;
+	if (playerPlus->customCacheResults.find(customcache) != playerPlus->customCacheResults.end()) {
+		previousValue = playerPlus->customCacheResults[customcache];
+	}
 	double newValue = initialValue;
 
 	// MC_EVALUATE_CUSTOM_CACHE
@@ -216,18 +252,29 @@ void RunEvaluateCustomCacheCallback(Entity_Player* player, const std::string cus
 	if (maxCoinsKeysBombs) {
 		UpdateMaxCoinsKeysBombs(customcache, newValue);
 	} else if (customcache == "healthtype") {
-		player->GetHealthType();
+		player->GetHealthType();  // Trigger enforcement of the health type
+	} else if (customcache == "tearscap" && newValue != previousValue) {
+		player->_cacheFlags |= CACHE_FIREDELAY;
+		playerPlus->customCacheRequiresEvaluateItemsCall = true;
+	} else if (customcache == "statmultiplier" && newValue != previousValue) {
+		player->_cacheFlags |= CACHE_DAMAGE | CACHE_FIREDELAY | CACHE_SHOTSPEED | CACHE_RANGE | CACHE_SPEED;
+		playerPlus->customCacheRequiresEvaluateItemsCall = true;
 	}
 }
 
 void TriggerCustomCache(Entity_Player* player, const std::set<std::string>& customcaches, const bool immediate) {
 	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+	if (!playerPlus) return;  // Aaah!
+
 	if (immediate) {
 		for (const std::string& customcache : customcaches) {
 			playerPlus->customCacheTags.erase(customcache);
 			RunEvaluateCustomCacheCallback(player, customcache);
 		}
-	} else if (playerPlus) {
+		if (playerPlus->customCacheRequiresEvaluateItemsCall) {
+			player->EvaluateItems();
+		}
+	} else {
 		for (const std::string& customcache : customcaches) {
 			playerPlus->customCacheTags.insert(customcache);
 		}
@@ -235,40 +282,39 @@ void TriggerCustomCache(Entity_Player* player, const std::set<std::string>& cust
 	}
 }
 
+void TriggerCustomCache(Entity_Player* player, XMLItem* xmlData, const int id, const bool immediate) {
+	if (xmlData->HasAnyCustomCache(id)) {
+		TriggerCustomCache(player, xmlData->GetCustomCache(id), immediate);
+	}
+}
+
 void TriggerNullCustomCache(Entity_Player* player, const int id, const bool immediate) {
-	TriggerCustomCache(player, XMLStuff.NullItemData->GetCustomCache(id), immediate);
+	TriggerCustomCache(player, XMLStuff.NullItemData, id, immediate);
 }
 
 void TriggerCollectibleCustomCache(Entity_Player* player, const int id, const bool immediate) {
-	TriggerCustomCache(player, XMLStuff.ItemData->GetCustomCache(id), immediate);
+	TriggerCustomCache(player, XMLStuff.ItemData, id, immediate);
 }
 
 void TriggerTrinketCustomCache(Entity_Player* player, const int id, const bool immediate) {
-	TriggerCustomCache(player, XMLStuff.TrinketData->GetCustomCache(id), immediate);
+	TriggerCustomCache(player, XMLStuff.TrinketData, id, immediate);
 }
 
 void TriggerItemCustomCache(Entity_Player* player, ItemConfig_Item* item, const bool immediate) {
 	if (item->type == 0) {  // Null
 		TriggerNullCustomCache(player, item->id, immediate);
-	}
-	else if (item->type == 2) {  // Trinket
+	} else if (item->type == 2) {  // Trinket
 		TriggerTrinketCustomCache(player, item->id, immediate);
-	}
-	else {  // Collectible (Passive/Active/Familiar)
+	} else {  // Collectible (Passive/Active/Familiar)
 		TriggerCollectibleCustomCache(player, item->id, immediate);
 	}
 }
 
 // Re-evaluate custom caches that appeared in XML data if EvaluateItems is run for CacheFlag.CACHE_ALL.
 HOOK_METHOD_PRIORITY(Entity_Player, EvaluateItems, -1, () -> void) {
-	const int cacheFlagAll = (1 << 16) - 1;  // CacheFlag.CACHE_ALL
-	const bool evaluateAll = (this->_cacheFlags & cacheFlagAll) == cacheFlagAll;
-
-	super();
-
 	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(this);
 	if (playerPlus) {
-		if (evaluateAll) {
+		if ((this->_cacheFlags & CACHE_ALL) == CACHE_ALL) {  // If visual studio tries to tell you that this equality check is not needed do NOT listen
 			for (const std::string& customcache : XMLStuff.AllCustomCaches) {
 				playerPlus->customCacheTags.insert(customcache);
 			}
@@ -282,7 +328,10 @@ HOOK_METHOD_PRIORITY(Entity_Player, EvaluateItems, -1, () -> void) {
 				RunEvaluateCustomCacheCallback(this, customcache);
 			}
 		}
+		playerPlus->customCacheRequiresEvaluateItemsCall = false;
 	}
+
+	super();
 }
 
 // Collectibles (both real and via wisps) trigger cache evaluations immediately when added or removed.
@@ -295,7 +344,7 @@ HOOK_METHOD_PRIORITY(Entity_Player, AddCollectible, -1, (int type, int charge, b
 HOOK_METHOD_PRIORITY(Entity_Familiar, WispInit, -1, () -> void) {
 	super();
 
-	if (this->_variant == 237 && this->_player) {
+	if (this->_variant == 237 && this->_subtype > 0 && this->_player) {
 		TriggerCollectibleCustomCache(this->_player, this->_subtype, true);
 	}
 }
@@ -354,13 +403,11 @@ void __stdcall FamiliarGetMultiplierTrampoline(Entity_Familiar* familiar, float 
 	}
 }
 void PatchFamiliarGetMultiplierCallback() {
-	SigScan scanner("5f5e5b8be55dc3????????????????????558bec83e4f856");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::FamiliarGetMultiplier);
 
 	printf("[REPENTOGON] Patching end of Entity_Familiar::GetMultiplier for callback at %p\n", addr);
 
-	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS | (ASMPatch::SavedRegisters::Registers::XMM_REGISTERS & ~ASMPatch::SavedRegisters::Registers::XMM0), true);
 	ASMPatch patch;
 	patch.PreserveRegisters(savedRegisters)
 		.AddBytes("\x66\x0F\x7E\xC0")  // movd eax, xmm0
@@ -379,9 +426,7 @@ const char* __stdcall GetHudCoinsStringFormat() {
 	return HUD_COINS_STR_FORMAT;
 }
 void PatchHudRenderCoins() {
-	SigScan scanner("e8????????8b75??85c0ba");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxCoins_HudRender);
 
 	printf("[REPENTOGON] Patching HUD::Render for max coins at %p\n", addr);
 
@@ -400,9 +445,7 @@ void PatchHudRenderCoins() {
 	sASMPatcher.PatchAt(addr, &patch);
 }
 void PatchAddCoins() {
-	SigScan scanner("e8????????f7d8c745??000000008d55??1bc08d4d??2584030000");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxCoins_AddCoins);
 
 	printf("[REPENTOGON] Patching EntityPlayer::AddCoins for max coins at %p\n", addr);
 
@@ -425,33 +468,23 @@ const char* __stdcall GetHudKeysStringFormat() {
 	return HUD_KEYS_STR_FORMAT;
 }
 void PatchAddKeys() {
-	SigScan scanner("83f8638945??56");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxKeys_AddKeys);
 
 	printf("[REPENTOGON] Patching EntityPlayer::AddKeys for max keys at %p\n", addr);
 
-	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS & ~ASMPatch::SavedRegisters::Registers::ESI, true);
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
-	patch.Push(ASMPatch::Registers::ESI)
-		.AddBytes("\x8D\x75\xFC")  // lea esi, [ebp - 0x4]
-		.Push(ASMPatch::Registers::ESI)
+	patch.AddBytes(ByteBuffer().AddAny((char*)addr + 0x3, 0x7))  // Restore a thigns
 		.PreserveRegisters(savedRegisters)
 		.AddInternalCall(GetMaxKeys)
-		.CopyRegister(ASMPatch::Registers::ESI, ASMPatch::Registers::EAX)
+		.AddBytes("\x39\x45").AddBytes(ByteBuffer().AddAny((char*)addr + 0x5, 0x1))  // cmp DWORD PTR [ebp+?],eax
+		.AddBytes("\x89\x45").AddBytes(ByteBuffer().AddAny((char*)addr + 0x9, 0x1))  // mov DWORD PTR [ebp+?],eax
 		.RestoreRegisters(savedRegisters)
-		.AddBytes("\x39\xF0")  // cmp eax,esi
-		.AddBytes("\x89\x45\x08")  // mov dword ptr [ebp + 0x8], eax
-		.AddBytes("\x89\x75\xFC")  // mov dword ptr [ebp - 0x4], esi
-		.Pop(ASMPatch::Registers::ESI)
 		.AddRelativeJump((char*)addr + 0x11);
 	sASMPatcher.PatchAt(addr, &patch);
 }
 void PatchHudRenderKeys() {
-	// wow
-	SigScan scanner("68????????6a1068????????e8????????83c410c785????????00000000c785????????ffff0000c785????????00000000c785????????0000803fc785????????ffffffffc785????????00000000c745??000000008d85????????c745??03000000");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxKeys_HudRender);
 
 	printf("[REPENTOGON] Patching HUD::Render for max keys at %p\n", addr);
 
@@ -471,9 +504,7 @@ const char* __stdcall GetHudBombsStringFormat() {
 	return HUD_BOMBS_STR_FORMAT;
 }
 void PatchAddBombs() {
-	SigScan scanner("c74424??6300000083f863894424??8d5424");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxBombs_AddBombs);
 
 	printf("[REPENTOGON] Patching EntityPlayer::AddBombs for max bombs at %p\n", addr);
 
@@ -483,16 +514,13 @@ void PatchAddBombs() {
 		.AddInternalCall(GetMaxBombs)
 		.CopyRegister(ASMPatch::Registers::EDX, ASMPatch::Registers::EAX)
 		.RestoreRegisters(savedRegisters)
-		.AddBytes("\x89\x54\x24\x08")  // mov dword ptr [esp + 0x8], edx
+		.AddBytes("\x89\x54\x24").AddBytes(ByteBuffer().AddAny((char*)addr + 0x3, 0x1))  // mov dword ptr [esp+?], edx
 		.AddBytes("\x39\xD0")  // cmp eax,edx
 		.AddRelativeJump((char*)addr + 0xB);
 	sASMPatcher.PatchAt(addr, &patch);
 }
 void PatchHudRenderBombs() {
-	// wow
-	SigScan scanner("68????????6a1068????????e8????????83c410c785????????00000000c785????????ffff0000c785????????00000000c785????????0000803fc785????????ffffffffc785????????00000000c745??000000008d85????????c745??01000000");
-	scanner.Scan();
-	void* addr = scanner.GetAddress();
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxBombs_HudRender);
 
 	printf("[REPENTOGON] Patching HUD::Render for max bombs at %p\n", addr);
 
@@ -505,33 +533,110 @@ void PatchHudRenderBombs() {
 		.AddRelativeJump((char*)addr + 0x5);
 	sASMPatcher.PatchAt(addr, &patch);
 }
+void PatchControlBombs() {
+	void* addr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxBombs_ControlBombs);
+
+	printf("[REPENTOGON] Patching EntityPlayer::control_bombs for max bombs at %p\n", addr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS & ~ASMPatch::SavedRegisters::Registers::ECX, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.AddInternalCall(GetMaxBombs)
+		.CopyRegister(ASMPatch::Registers::ECX, ASMPatch::Registers::EAX)
+		.RestoreRegisters(savedRegisters)
+		.AddRelativeJump((char*)addr + 0x5);
+	sASMPatcher.PatchAt(addr, &patch);
+}
 
 
 // Prevent RemoveCurseMistEffect from enforcing the coin/key/bomb limits when restoring consumables.
 // The patches overwrite cmov's that would conditionally write the pickup limit instead of the actual value, and makes the actual value always written.
 // If a higher amount than should normally be allowed is restored, we'll fix it on customcache evaluation anyway.
 void PatchRemoveCurseMistEffect() {
-	SigScan coinScanner("6a015168a0010000");
-	coinScanner.Scan();
-	void* coinAddr = coinScanner.GetAddress();
-	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max coins at %p\n", coinAddr);
+	// Coins
+	void* coinPatchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxCoins_CurseMist);
+	void* coinExitAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxCoins_CurseMist_Exit);
+
+	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max coins at %p (exit @ %p)\n", coinPatchAddr, coinExitAddr);
 	ASMPatch coinPatch;
-	coinPatch.AddBytes("\x8B\x8F\xAC\x12").AddZeroes(2)  // ECX,dword ptr [EDI + 0x12ac] (restores something that gets skipped)
+	coinPatch.AddBytes(ByteBuffer().AddAny((char*)coinPatchAddr + 13, 0x6)) // ECX,dword ptr [EDI+?] (restores something that gets skipped)
 		.AddBytes("\x89\xF0")  // MOV EAX,ESI
-		.AddRelativeJump((char*)coinAddr + 0x24);
-	sASMPatcher.PatchAt((char*)coinAddr, &coinPatch);
+		.AddRelativeJump((char*)coinExitAddr);
+	sASMPatcher.PatchAt((char*)coinPatchAddr, &coinPatch);
 
-	SigScan keyScanner("3bc80f4cc18987????????8b87????????0387????????3bc6");
-	keyScanner.Scan();
-	void* keyAddr = keyScanner.GetAddress();
-	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max keys at %p\n", keyAddr);
-	sASMPatcher.FlatPatch((char*)keyAddr, "\x89\xC8\x90\x90\x90", 5);  // MOV EAX, ECX
+	// Keys
+	void* keyPatchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxKeys_CurseMist);
+	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max keys at %p\n", keyPatchAddr);
+	sASMPatcher.FlatPatch((char*)keyPatchAddr, "\x89\xC8\x90\x90\x90", 5);  // MOV EAX, ECX
 
-	SigScan bombScanner("3bc60f4cd080bf????????00");
-	bombScanner.Scan();
-	void* bombAddr = bombScanner.GetAddress();
-	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max bombs at %p\n", bombAddr);
-	sASMPatcher.FlatPatch((char*)bombAddr, "\x89\xC2\x90\x90\x90", 5);  // MOV EDX, EAX
+	// Bombs
+	void* bombPatchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::MaxBombs_CurseMist);
+	printf("[REPENTOGON] Patching RemoveCurseMistEffect for max bombs at %p\n", bombPatchAddr);
+	sASMPatcher.FlatPatch((char*)bombPatchAddr, "\x89\xC2\x90\x90\x90", 5);  // MOV EDX, EAX
+}
+
+
+// Tears cap (real)
+void __stdcall TearsCapHook(Entity_Player* player, float* minimumFiredDelayOut) {
+	*minimumFiredDelayOut = 5;  // Default value.
+
+	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+	if (playerPlus && playerPlus->customCacheResults.find("tearscap") != playerPlus->customCacheResults.end()) {
+		const double tearscap = playerPlus->customCacheResults["tearscap"];
+		if (tearscap > 0) {
+			// Convert to firedelay
+			*minimumFiredDelayOut = (float)std::max((30.0 / tearscap) - 1.0, -0.75);
+		}
+	}
+}
+void PatchTearsCap() {
+	void* patchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::TearsCap);
+	void* ebpOffsetAddr = (char*)patchAddr + 0x2;
+	void* movEsiPlayerAddr = (char*)patchAddr + 0x23;
+
+	printf("[REPENTOGON] Patching EvaluateItems for tears cap at %p\n", patchAddr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS | ASMPatch::SavedRegisters::Registers::XMM_REGISTERS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)ebpOffsetAddr, 0x4))  // lea ebx, [ebp+?]
+		.Push(ASMPatch::Registers::EBX)  // float* minimumFiredDelay
+		.AddBytes(ByteBuffer().AddAny((char*)movEsiPlayerAddr, 0x6))  // mov ESI,dword ptr [ebp+?]
+		.Push(ASMPatch::Registers::ESI)  // Entity_Player*
+		.AddInternalCall(TearsCapHook)
+		.RestoreRegisters(savedRegisters)
+		.AddRelativeJump((char*)patchAddr + 0xA);
+	sASMPatcher.PatchAt(patchAddr, &patch);
+}
+
+
+// Stats Multiplier (ie Cracked Crown, Tainted Bethany)
+void __stdcall StatMultiplierHook(Entity_Player* player, float* statMultiplierOut) {
+	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+	if (playerPlus && playerPlus->customCacheResults.find("statmultiplier") != playerPlus->customCacheResults.end() && playerPlus->customCacheResults["statmultiplier"] > 0) {
+		*statMultiplierOut = (float)playerPlus->customCacheResults["statmultiplier"];
+	} else {
+		*statMultiplierOut = GetVanillaStatMultiplier(player);
+	}
+}
+void PatchStatMultiplier() {
+	void* patchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::StatMultiplier);
+	void* ebpOffsetAddr = (char*)sASMDefinitionHolder->GetDefinition(&AsmDefinitions::StatMultiplier_Jump) + 0x4;
+	void* jumpAddr = (char*)ebpOffsetAddr + 0x4;
+
+	printf("[REPENTOGON] Patching EvaluateItems for stat multiplier at %p\n", patchAddr);
+
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS | ASMPatch::SavedRegisters::Registers::XMM_REGISTERS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.AddBytes("\x8D\x9D").AddBytes(ByteBuffer().AddAny((char*)ebpOffsetAddr, 0x4))  // lea ebx, [ebp+?]
+		.Push(ASMPatch::Registers::EBX)  // float* minimumFiredDelay
+		.Push(ASMPatch::Registers::ECX)  // Entity_Player*
+		.AddInternalCall(StatMultiplierHook)
+		.RestoreRegisters(savedRegisters)
+		.CopyRegister(ASMPatch::Registers::EAX, ASMPatch::Registers::ECX)
+		.AddRelativeJump(jumpAddr);
+	sASMPatcher.PatchAt(patchAddr, &patch);
 }
 
 
@@ -543,5 +648,8 @@ void ASMPatchesForCustomCache() {
 	PatchHudRenderCoins();
 	PatchHudRenderKeys();
 	PatchHudRenderBombs();
+	PatchControlBombs();
 	PatchRemoveCurseMistEffect();
+	PatchTearsCap();
+	PatchStatMultiplier();
 }

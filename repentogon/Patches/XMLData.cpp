@@ -40,6 +40,7 @@ char* achieveemntsxmlpreload = "";
 bool achievsloaded = false;
 
 char* lastmodid = "BaseGame";
+bool didoddxmlpatch = false;
 bool iscontent = false;
 bool isitemmetadata = false;
 bool no = false;
@@ -826,7 +827,7 @@ void ParseTagsString(const string& str, set<string>& out) {
 }
 
 // If the item has the appropriate customtags, adds it to the customreviveitems map
-// to make it more efficient to check if the player has any of them layer.
+// to make it more efficient to check if the player has any of them later.
 void CheckCustomRevive(const int id, XMLItem* data) {
 	const bool hasReviveTag = data->HasCustomTag(id, "revive");
 	const bool hasReviveEffectTag = data->HasCustomTag(id, "reviveeffect");
@@ -836,6 +837,25 @@ void CheckCustomRevive(const int id, XMLItem* data) {
 		info->effect = hasReviveEffectTag;
 		info->hidden = data->HasCustomTag(id, "hiddenrevive");
 		info->chance = data->HasCustomTag(id, "chancerevive");
+	}
+}
+
+// Parses xml-defined item stats.
+void ParseXmlItemStats(const int id, XMLAttributes* xmlAttributes, XMLItem* data, const bool isNullItem) {
+	for (const auto& [stat, tag] : EvaluateStats::evaluteStatXmlTags) {
+		if (xmlAttributes->find(tag) != xmlAttributes->end()) {
+			float value = stof(xmlAttributes->at(tag));
+			if (isNullItem) {
+				data->effectstatups[stat][id] = value;
+			} else {
+				data->statups[stat][id] = value;
+			}
+		}
+
+		const string effecttag = "effect" + tag;
+		if (xmlAttributes->find(effecttag) != xmlAttributes->end()) {
+			data->effectstatups[stat][id] = stof(xmlAttributes->at(effecttag));
+		}
 	}
 }
 
@@ -987,6 +1007,11 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 			}
 			else {
 				XMLStuff.PlayerData->bynamemod[player["name"] + lastmodid] = id;
+			}
+
+			// If only "hideachievement" was specified, use that value for "achievement" too.
+			if (player.find("achievement") == player.end() && player.find("hideachievement") != player.end()) {
+				player["achievement"] = player["hideachievement"];
 			}
 
 			player["sourceid"] = lastmodid;
@@ -1164,6 +1189,8 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 					} else if (id == COLLECTIBLE_DEEP_POCKETS) {
 						XMLStuff.ItemData->customcache[id].insert("maxcoins");
 					}
+					ParseXmlItemStats(id, &item, XMLStuff.ItemData, false);
+
 					XMLStuff.ItemData->ProcessChilds(auxnode, id);
 					XMLStuff.ItemData->bynamemod[item["name"] + lastmodid] = id;
 					XMLStuff.ItemData->bymod[lastmodid].push_back(id);
@@ -1235,6 +1262,8 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 						ParseTagsString(trinket["customcache"], XMLStuff.TrinketData->customcache[id]);
 						ParseTagsString(trinket["customcache"], XMLStuff.AllCustomCaches);
 					}
+					ParseXmlItemStats(id, &trinket, XMLStuff.TrinketData, false);
+
 					XMLStuff.TrinketData->ProcessChilds(auxnode, id);
 					XMLStuff.TrinketData->bynamemod[trinket["name"] + lastmodid] = id;
 					XMLStuff.TrinketData->bymod[lastmodid].push_back(id);
@@ -1282,6 +1311,7 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 					ParseTagsString(item["customcache"], XMLStuff.NullItemData->customcache[id]);
 					ParseTagsString(item["customcache"], XMLStuff.AllCustomCaches);
 				}
+				ParseXmlItemStats(id, &item, XMLStuff.NullItemData, true);
 
 				XMLStuff.NullItemData->ProcessChilds(auxnode, id);
 				XMLStuff.NullItemData->bynamemod[item["name"] + lastmodid] = id;
@@ -2329,6 +2359,7 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 		}
 		break;
 	case 99: //name for mod metadata
+	if (didoddxmlpatch) { break; }
 	if (node->parent() && (strcmp(stringlower(node->parent()->name()).c_str(), "metadata") == 0)) {
 		daddy = node->parent();
 		XMLAttributes mod;
@@ -2346,7 +2377,7 @@ void ProcessXmlNode(xml_node<char>* node,bool force = false) {
 			}
 		}
 		int idx;
-		if (mod.count("id") <= 0) { mod["id"] = mod["directory"];  }
+		if ((mod.count("id") <= 0) || (XMLStuff.ModData->byid.find(mod["id"]) != XMLStuff.ModData->byid.end())) { mod["id"] = mod["directory"];  }
 
 		if (XMLStuff.ModData->byid.find(mod["id"]) != XMLStuff.ModData->byid.end()) {
 			idx = XMLStuff.ModData->byid[mod["id"]];
@@ -2428,6 +2459,7 @@ void UpdateOddXMLSourceData()
 			XMLStuff.CurseData->nodes[att.first] = node;
 		}
 	}
+	didoddxmlpatch = true;
 }
 
 HOOK_METHOD(Manager, LoadConfigs,()->void) {
@@ -2577,7 +2609,7 @@ bool Lua_PushXMLSubNodes(lua_State* L, vector<XMLAttributes> node)
 		lua_newtable(L);
 		for each (const auto & att in elem)
 		{
-			printf("attr: %s / %s \n", att.first.c_str(), att.second.c_str());
+			//printf("attr: %s / %s \n", att.first.c_str(), att.second.c_str());
 			lua_pushstring(L, att.first.c_str());
 			lua_pushstring(L, att.second.c_str());
 			lua_settable(L, -3);
@@ -2593,7 +2625,7 @@ bool Lua_PushXMLNode(lua_State* L, XMLAttributes node, unordered_map<string, vec
 	lua_newtable(L);
 	for each (const auto & att in node)
 	{
-		printf("attr: %s / %s \n", att.first.c_str(), att.second.c_str());
+		//printf("attr: %s / %s \n", att.first.c_str(), att.second.c_str());
 		lua_pushstring(L, att.first.c_str());
 		lua_pushstring(L, att.second.c_str());
 		lua_settable(L, -3);
@@ -3564,6 +3596,7 @@ char* ParseModdedXMLAttributes(char* xml, const string& filename) {
 				for (xml_node<char>* auxnode = root->first_node(); auxnode; auxnode = auxnode->next_sibling()) {
 					did += MultiValXMLParamParse(auxnode, xmldoc, XMLStuff.ItemData, "items");
 					did += SingleValXMLParamParse(auxnode, xmldoc, XMLStuff.ItemData, "pocketActive");
+					did += SingleValXMLParamParse(auxnode, xmldoc, XMLStuff.TrinketData, "trinket");
 				}
 			}else if (strcmp(filename.c_str(), "challenges.xml") == 0) {
 				for (xml_node<char>* auxnode = root->first_node(); auxnode; auxnode = auxnode->next_sibling()) {
@@ -3665,6 +3698,7 @@ HOOK_METHOD(ModManager, LoadConfigs, () -> void) {
 
 	super();
 
+	EvaluateStats::UpdateItemConfig();
 
 	//retroactively patch playertype for challenges because the game sucks ass and loads modded challenges before players
 	for (int i = 46; i<=XMLStuff.ChallengeData->maxid; i++) {

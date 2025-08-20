@@ -31,6 +31,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitAsmDef(ZHLParser::AsmDefContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitFunction(ZHLParser::FunctionContext *ctx) override {
     return visitChildren(ctx);
   }

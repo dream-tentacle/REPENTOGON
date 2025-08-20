@@ -10,11 +10,15 @@ __thiscall std_vector_uint * Entity_Knife::GetHitEntities();
 "558bec51568bf18975??e8????????c706????????8d8e":
 __thiscall void Entity_Knife::Constructor();
 
-struct Entity_Knife : public Entity { 
-	bool _isSwinging : 0x45d;
-	bool _prismApplied : 0x4dd;
-	bool _multidimensionalApplied : 0x4de;
-	bool _isSpinAttack : 0x4e2;
+"8b81????????85c074??8378??0875??8b88":
+__thiscall Entity_Player* Entity_Knife::GetPlayer();
+
+struct Entity_Knife depends (BitSet128) : public Entity { 
+	BitSet128 _tearFlags : 0x410;
+	bool _isSwinging : 0x465;
+	bool _prismApplied : 0x4e5;
+	bool _multidimensionalApplied : 0x4e6;
+	bool _isSpinAttack : 0x4ea;
 
 	__vtable {
 		skip; // Free
@@ -22,7 +26,7 @@ struct Entity_Knife : public Entity {
 		skip; // PreUpdate
 		
 		override
-		"558bec6aff68????????64a1????????5081eca8010000":
+		"558bec6aff68????????64a1????????5081eca8010000a1????????33c58945??5657508d45??64a3????????8bf9":
 		void Update();
 		
 		skip; // Interpolate
@@ -33,6 +37,7 @@ struct Entity_Knife : public Entity {
 		skip; // Kill
 		skip; // Remove
 		skip; // TriggerGlowingHourglass
+		skip; // ???
 		skip; // GetRenderZ
 		skip; // CanOverwrite
 		skip; // SetColor
@@ -47,4 +52,4 @@ struct Entity_Knife : public Entity {
 		skip; // ResetColor
 		skip; // LoadEntityConfig
 	};
-} : 0xe70;
+} : 0xe78;

@@ -63,7 +63,7 @@ void ASMPatchSpeed() {
 	ASMPatch patch;
 
 	patch.AddBytes("\xF3\x0F\x58\x05").AddBytes(ByteBuffer().AddAny((char*)&speedPtr, 4)) // addss xmm0, dword ptr ds:[0xXXXXXXXX]
-		.AddBytes("\xF3\x0F\x11\x87\x54\x15").AddZeroes(2) // movss dword ptr [edi + 0x1554], xmm0
+		.AddBytes(ByteBuffer().AddAny((char*)addr, 8)) // movss dword ptr [edi + 0x????], xmm0
 		.AddRelativeJump((char*)addr + 0x8); // jmp isaac-ng.XXXXXXXX
 	sASMPatcher.PatchAt(addr, &patch);
 }
@@ -85,17 +85,21 @@ void ASMPatchDamage() {
 	sASMPatcher.PatchAt(addr, &patch);
 }
 
+void __stdcall RangeTrampoline(Entity_Player* player) {
+	player->_tearrange += PlayerStats::modCharacterRange;
+}
 void ASMPatchRange() {
 	SigScan scanner("83f80974??83f81e74");
 	scanner.Scan();
 	void* addr = scanner.GetAddress();
-	void* rangePtr = &PlayerStats::modCharacterRange;
 	printf("[REPENTOGON] Patching EvaluateCache Range at %p\n", addr);
-	ASMPatch patch;
 
-	patch.AddBytes("\xF3\x0F\x10\x05").AddBytes(ByteBuffer().AddAny((char*)&rangePtr, 4)) // movss xmm0, dword ptr ds:[0xXXXXXXXX]
-		.AddBytes("\xF3\x0F\x58\x87\x74\x14").AddZeroes(2) // addss xmm0, dword ptr [edi + 0x1474]
-		.AddBytes("\xF3\x0F\x11\x87\x74\x14").AddZeroes(2) // movss dword ptr [edi + 0x1474], xmm0
+	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS | ASMPatch::SavedRegisters::Registers::XMM_REGISTERS, true);
+	ASMPatch patch;
+	patch.PreserveRegisters(savedRegisters)
+		.Push(ASMPatch::Registers::EDI)
+		.AddInternalCall(RangeTrampoline)
+		.RestoreRegisters(savedRegisters)
 		.AddBytes("\x83\xF8\x09") // cmp eax, 0x9
 		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JZ, (char*)addr + 0x30) // jz isaac-ng.XXXXXXXX
 		.AddRelativeJump((char*)addr + 0x5);  // jmp isaac-ng.XXXXXXXX
@@ -128,7 +132,7 @@ void ASMPatchLuck() {
 	ASMPatch patch;
 
 	patch.AddBytes("\xF3\x0F\x58\x15").AddBytes(ByteBuffer().AddAny((char*)&luckPtr, 4)) // addss xmm2, dword ptr ds:[0xXXXXXXXX]
-		.AddBytes("\xF3\x0F\x58\x97\x4c\x15").AddZeroes(2) // addss xmm2, dword ptr [edi + 154c]
+		.AddBytes(ByteBuffer().AddAny((char*)addr, 8)) // addss xmm2, dword ptr [edi + 0x????]
 		.AddRelativeJump((char*)addr + 0x8);  // jmp isaac-ng.XXXXXXXX
 	sASMPatcher.PatchAt(addr, &patch);
 }
@@ -152,7 +156,7 @@ void __stdcall SetMarsDoubleTapWindow() {
 }
 
 void ASMPatchMarsDoubleTapWindow() {
-	SigScan scanner("83bf????????0a7f"); // cmp dword ptr [EDI + 0x1e78],0xa
+	SigScan scanner("83bf????????0a7f"); // cmp dword ptr [EDI + XXXXXXXX],0xa
 	scanner.Scan();
 	void* addr = scanner.GetAddress();
 	void* frameWindowPtr = &marsDoubleTapWindow;
@@ -162,8 +166,10 @@ void ASMPatchMarsDoubleTapWindow() {
 	patch.PreserveRegisters(savedRegisters)  // Store for later
 		.AddInternalCall(SetMarsDoubleTapWindow)
 		.AddBytes("\xA1").AddBytes(ByteBuffer().AddAny((char*)&frameWindowPtr, 4)) // mov eax, dword ptr ds:[XXXXXXXX]
-		.AddBytes("\x39\x87\x78\x1e").AddZeroes(2) // cmp dword ptr [EDI + 0x1e],EAX
+		// Gets offset of mars framecount directly from the address for update resistance
+		.AddBytes("\x39\x87").AddBytes(ByteBuffer().AddAny((char*)addr+0x2, 4)) // cmp dword ptr [EDI + 0xXXXXXXXX,EAX
 		.RestoreRegisters(savedRegisters)
+		// This code block is otherwise so simple that I don't expect this offset to ever change
 		.AddRelativeJump((char*)addr + 0x7);
 	sASMPatcher.PatchAt(addr, &patch);
 }

@@ -1176,7 +1176,7 @@ Same as MC_INPUT_ACTION, but only works in the main menu.
 
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
-|1464 | MC_MENU_INPUT_ACTION {: .copyable } | ([Entity](../Entity.md), <br>[InputHook](InputHook.md), <br>[ButtonAction](ButtonAction.md))|[InputHook](InputHook.md) | boolean or float |
+|1464 | MC_MENU_INPUT_ACTION {: .copyable } | ([Entity](../Entity.md), <br>[InputHook](https://wofsauge.github.io/IsaacDocs/rep/enums/InputHook.html), <br>[ButtonAction](https://wofsauge.github.io/IsaacDocs/rep/enums/ButtonAction.html))|[InputHook](https://wofsauge.github.io/IsaacDocs/rep/enums/InputHook.html) | boolean or float |
 
 ### MC_POST_MODS_LOADED {: .copyable }
 Called after all Lua scripts have been loaded. Ideal for running code that is expected to run after all mods are initialized, but without the need for load order idiocy!
@@ -1242,6 +1242,9 @@ This callback triggers when an active gets rerolled by 'M (trinket id 138) and a
 ### MC_PRE_NEW_ROOM {: .copyable }
 Accepts no return parameters.
 
+???+ warning "Warning"
+    While this provides a Room object, and the room object is perfectly fine, the callback fires BEFORE THE ROOM IS FULLY INITIALIZED, so operations surrounding the Room object stuff should be considered unstable and unreliable, used at your own discretion, some seemindly friendly functions like GetCenterPos are already known to cause problems when used within this callback, so, again, try to move Room object stuff to other callbacks that happen after this one.
+
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
 |1200 |MC_PRE_NEW_ROOM {: .copyable } | ([Room](https://wofsauge.github.io/IsaacDocs/rep/Room) Room, <br>[RoomDescriptor](https://wofsauge.github.io/IsaacDocs/rep/RoomDescriptor) Descriptor) | - | void |
@@ -1300,7 +1303,7 @@ Runs right after a dark red champion regenerates out of the goo form.
 |1223 |MC_POST_NPC_DARK_RED_CHAMPION_REGEN {: .copyable } | ([EntityNPC](../EntityNPC.md) NPC) | [EntityType](https://wofsauge.github.io/IsaacDocs/rep/enums/EntityType.html) | void |
 
 ### MC_EVALUATE_CUSTOM_CACHE {: .copyable }
-Called when a custom cache is evaluated (see [items.xml](xml/items.md)). Return a number to modify the value. Modified values are passed onto the next callback.
+Called when a custom cache is evaluated (see [items.xml](../xml/items.md)). Return a number to modify the value. Modified values are passed onto the next callback.
 
 The initial value is always 0. The most recent result can be obtained at any time using `player:GetCustomCacheValue("mycustomcache")`
 
@@ -1313,7 +1316,7 @@ Called when a familiar's cached multiplier needs to be re-evaluated. Return a nu
 
 Effects such as BFFs or Hive Mind have already been applied at this point.
 
-Note that the result of this callback is cached, so the callback only runs when needed. It will be triggered if an item with the `familiarmultiplier` "customcache" is added/removed (see [items.xml](xml/items.md)) or if `familiar:InvalidateCachedMultiplier()` is called.
+Note that the result of this callback is cached, so the callback only runs when needed. It will be triggered if an item with the `familiarmultiplier` "customcache" is added/removed (see [items.xml](../xml/items.md)) or if `familiar:InvalidateCachedMultiplier()` is called.
 
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
@@ -2012,7 +2015,7 @@ Return `false` to cancel it."
 
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
-|1481 |MC_PRE_PLAYER_REVIVE {: .copyable } | ([EntityPlayer](../EntityPlayer.md) Player) | [PlayerType]([https://wofsauge.github.io/IsaacDocs/rep/enums/PlayerType.html) | boolean |
+|1481 |MC_PRE_PLAYER_REVIVE {: .copyable } | ([EntityPlayer](../EntityPlayer.md) Player) | [PlayerType](https://wofsauge.github.io/IsaacDocs/rep/enums/PlayerType.html) | boolean |
 
 ### MC_POST_PLAYER_REVIVE {: .copyable }
 Called after the player revives, assuming it wasn't cancelled.
@@ -2257,7 +2260,7 @@ Called when this entity collides with the grid, assuming it wasn't skipped.
 
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
-|1032 |MC_POST_TEAR_DEATH {: .copyable } | ([EntityTear](../EntityTear.md) Tear) | [TearVariant](https://wofsauge.github.io/IsaacDocs/rep/enums/TearVariant.html) | void |
+|1033 |MC_POST_TEAR_DEATH {: .copyable } | ([EntityTear](../EntityTear.md) Tear) | [TearVariant](https://wofsauge.github.io/IsaacDocs/rep/enums/TearVariant.html) | void |
 
 ### MC_POST_BOSS_INTRO_SHOW {: .copyable }
 Accepts no return parameters.
@@ -2416,7 +2419,7 @@ Return an integer to override the target room index.
 
 |ID|Name|Function Args|Optional Args|Return Type|
 |:--|:--|:--|:--|:--|
-|1290 |MC_PRE_FORTUNE_DISPLAY {: .copyable } | (int RoomIndex, bool IAmErrorRoom, int Seed) | - | int |
+|1290 |MC_PRE_GET_RANDOM_ROOM_INDEX {: .copyable } | (int RoomIndex, bool IAmErrorRoom, int Seed) | - | int |
 
 ### MC_PRE_GLOWING_HOURGLASS_SAVE {: .copyable }
 Called after the Glowing Hourglass state is saved.

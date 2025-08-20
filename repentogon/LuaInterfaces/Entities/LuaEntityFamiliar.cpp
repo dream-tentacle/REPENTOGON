@@ -24,17 +24,42 @@ LUA_FUNCTION(Lua_FamiliarGetPathFinder)
 LUA_FUNCTION(Lua_FamiliarTryAimAtMarkedTarget)
 {
 	Entity_Familiar* fam = lua::GetLuabridgeUserdata<Entity_Familiar*>(L, 1, lua::Metatables::ENTITY_FAMILIAR, "EntityFamiliar");
-	Vector* aimDirection = lua::GetLuabridgeUserdata<Vector*>(L, 2, lua::Metatables::VECTOR, "Vector");
-	int direction = (int)luaL_checkinteger(L, 3);
-	Vector buffer;
-	if (fam->TryAimAtMarkedTarget(aimDirection, direction, &buffer)) {
-		lua::luabridge::UserdataPtr::push(L, &buffer, lua::GetMetatableKey(lua::Metatables::VECTOR));
+	Vector aimDirection;
+	if (lua_type(L, 2) == LUA_TUSERDATA) {
+		aimDirection = *lua::GetLuabridgeUserdata<Vector*>(L, 2, lua::Metatables::VECTOR, "Vector");
 	}
-	else
-	{
-		lua_pushnil(L);
+	int direction = (int)luaL_optinteger(L, 3, -1);
+	Vector targetPosBuffer;
+	if (lua_type(L, 4) == LUA_TUSERDATA) {
+		targetPosBuffer = *lua::GetLuabridgeUserdata<Vector*>(L, 4, lua::Metatables::VECTOR, "Vector");
 	}
-	return 1;
+	bool success = fam->TryAimAtMarkedTarget(&aimDirection, &direction, &targetPosBuffer);
+
+	if (lua_gettop(L) == 3) {
+		if (success) {
+			lua::luabridge::UserdataValue<Vector>::push(L, lua::GetMetatableKey(lua::Metatables::VECTOR), targetPosBuffer);
+		}
+		else
+		{
+			lua_pushnil(L);
+		}
+		return 1;
+	}
+
+	lua_pushboolean(L, success);
+
+	lua_newtable(L);
+	lua_pushinteger(L, 1);
+	lua::luabridge::UserdataValue<Vector>::push(L, lua::GetMetatableKey(lua::Metatables::VECTOR), aimDirection);
+	lua_rawset(L, -3);
+	lua_pushinteger(L, 2);
+	lua_pushinteger(L, direction);
+	lua_rawset(L, -3);
+	lua_pushinteger(L, 3);
+	lua::luabridge::UserdataValue<Vector>::push(L, lua::GetMetatableKey(lua::Metatables::VECTOR), targetPosBuffer);
+	lua_rawset(L, -3);
+	
+	return 2;
 }
 
 LUA_FUNCTION(Lua_FamiliarTriggerRoomClear)
@@ -201,6 +226,42 @@ LUA_FUNCTION(Lua_SetLilDelirium) {
 	return 0;
 }
 
+LUA_FUNCTION(Lua_GetRandomWisp) {
+	RNG* rng = lua::GetLuabridgeUserdata<RNG*>(L, 1, lua::Metatables::RNG, "RNG");
+	lua_pushinteger(L, Entity_Familiar::GetRandomWisp(*rng));
+	return 1;
+}
+
+LUA_FUNCTION(Lua_FamiliarGetActiveWeaponEntity)
+{
+	Entity_Familiar* fam = lua::GetLuabridgeUserdata<Entity_Familiar*>(L, 1, lua::Metatables::ENTITY_FAMILIAR, "EntityFamiliar");
+	Weapon* wep = fam->_weapon;
+	if (wep == nullptr) {
+		lua_pushnil(L);
+	}
+	else
+	{
+		lua::luabridge::UserdataPtr::push(L, wep->GetMainEntity(), lua::GetMetatableKey(lua::Metatables::ENTITY));
+	}
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_FamiliarGetActiveWeaponNumFired)
+{
+	Entity_Familiar* fam = lua::GetLuabridgeUserdata<Entity_Familiar*>(L, 1, lua::Metatables::ENTITY_FAMILIAR, "EntityFamiliar");
+	Weapon* wep = fam->_weapon;
+	if (wep == nullptr) {
+		lua_pushnil(L);
+	}
+	else
+	{
+		lua_pushinteger(L, wep->_numFired);
+	}
+
+	return 1;
+}
+
 HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 	super();
 
@@ -228,8 +289,13 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 		{ "GetMultiplier", Lua_FamiliarGetMultiplier },
 		{ "IsLilDelirium", Lua_FamiliarIsLilDelirium },
 		{ "SetLilDelirium", Lua_SetLilDelirium },
+		{ "GetRandomWisp", Lua_GetRandomWisp },
+		{ "GetActiveWeaponEntity", Lua_FamiliarGetActiveWeaponEntity },
+		{ "GetActiveWeaponNumFired", Lua_FamiliarGetActiveWeaponNumFired },
 		{ NULL, NULL }
 	};
 
 	lua::RegisterFunctions(_state, lua::Metatables::ENTITY_FAMILIAR, functions);
+
+	lua::RegisterGlobalClassFunction(_state, "EntityFamiliar", "GetRandomWisp", Lua_GetRandomWisp);
 }

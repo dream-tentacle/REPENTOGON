@@ -4,13 +4,21 @@ v1.0.x -
 Additions:
 * Camera:
 	- Update(bool Interpolated = false)
+* ChallengeParam:
+	- IsBeastPath
 * GridEntity
 	- [Get/Set/Reset]WaterClipFlags
 * Entity
 	- [Get/Set/Reset]WaterClipFlags
+	- CanDevolve
 * EntityPickup:
 	- GetMegaChest[Left/Right]Collectible
-	- Returns the other EntityPickup for a Mega Chest
+		Returns the other EntityPickup for a Mega Chest
+	- HasFlipData
+		Returns true if pickup is collectible and has Flip save state.
+	- GetFlipCollectible
+		Returns CollectibleType if flip save state exists, nil otherwise.
+	- InitFlipState(CollectibleType = CollectibleType.COLLECTIBLE_NULL, SetupCollectibleGraphics = true)
 * EntityPlayer:
 	- [Get/Set]ActionHoldDrop - how long player holds action drop button.
 	- [Get/Set]ForgottenSwapFormCooldown
@@ -20,14 +28,71 @@ Additions:
 	- [Get/Set]RockBottomTearRange
 	- [Get/Set]RockBottomShotSpeed
 	- [Get/Set]RockBottomLuck
+	- [Get/Set]RevelationCharge
+	- GetPlayerHUD
+	- [Get/Set]SuplexState
+	- [Get/Set]SuplexAimCountdown
+	- [Get/Set]SuplexTargetPosition
+	- [Get/Set]SuplexLandPosition
+	- CreateAfterimage
+	- [Add/Get]CandyHeartBonus
+	- [Add/Get]SoulLocketBonus
+	- GetTearsCap
+	- GetStatMultiplier
+	- GetSmeltedTrinketDesc
 * EntityFamiliar:
 	- IsLilDelirium
 	- SetLilDelirium
+	- GetRandomWisp
+	- GetActiveWeaponEntity
+	- GetActiveWeaponNumFired
+* EntityTear:
+	- GetHitList
+	- ClearHitList
+* EntityConfigEntity:
+	- GetDevolvedEntity
 * Level:
 	- Added overloads for CanPlaceRoom(AtDoor) and FindValidRoomPlacementLocations that accept a RoomShape and DoorMask instead of a RoomConfigRoom.
 * PlayerManager:
 	- GetRandomCollectibleOwner
 	- GetRandomTrinketOwner
+* ItemPool:
+	- AddCollectible
+	- AddTemporaryCollectible
+	- RemoveTemporaryCollectible
+* ItemConfig_Item:
+	- Add/RemoveCustomTag
+	- Add/RemoveCustomCacheTag
+* HUD:
+	- GetStackedStreakSprite
+	- GetPlayerStreakSprite
+* PlayerHUD:
+	- GetIndex
+	- GetLayout
+* ProceduralEffect
+	- Fix fartScale.
+	- GetScore
+	- GetTriggerChanceScale
+* Room:
+	- TriggerOutput(RoomEventOutput GroupIdx)
+* RoomConfig:
+	- AddRooms
+* RoomConfigSet:
+	- AddRooms
+* FXLayers:
+	- AddPoopFx(ColorMod Color)
+* Weapon:
+	- GetMainEntity
+		Returns active entity used by weapon (Brimstone - EntityLaser, Mom's Knife -  EntityKnife and etc.)
+* MenuManager:
+	- IsActive: returns true when MenuManager is ready to be used a.k.a if you can use the menuman functions (normally, if you are at the main menu)
+* CharacterMenu
+	- GetPlayerTypeFromCharacterMenuID(int CharacterMenuID, bool Tainted)
+		Tainted boolean defaults to current menu if unspecified.
+* Players.xml
+	- Added support for modded/text trinkets on the "trinket" param (I forgot trinkets existed tbh, lol)
+	- Added "hideachievement" attribute, which hides the character from the character select menu until the corresponding achievement is obtained
+		(Doesn't do anything for tainted characters, since whether or not they appear on the menu is entirely dependant on the non-tainted character)
 * ModCallbacks:
 	- MC_PRE_PLAYER_POCKET_ITEMS_SWAP(EntityPlayer player)
 		Triggers when the player swaps their pocket items using the action drop button (even if they are empty).
@@ -59,24 +124,98 @@ Additions:
 		Return false on the PRE callback to cancel adding the status effect
 	- MC_PLAYER_HEALTH_TYPE_CHANGE
 		Runs when a player's health type changes, but before automatic health conversion
+	- MC_POST_ROOM_RENDER_ENTITIES
+		Runs after all entities & grid entities in the room have been rendered, but BEFORE effects like overlays, shockwaves, and the mirror world effect are applied.
+		Rendering done on this callback is also preserved in room transition animations.
+	- MC_POST_START_AMBUSH_WAVE(boolean BossAmbush)
+		Fires at the start of challenge/boss rush room wave
+	- MC_POST_START_GREED_WAVE
+		(add description later)
+	- MC_EVALUATE_MULTI_SHOT_PARAMS(EntityPlayer, MultiShotParams, WeaponType)
+		Optional param: PlayerType
+		Replacement for the legacy MC_POST_PLAYER_GET_MULTI_SHOT_PARAMS that passes along a mutable MultiShotParams and allows all mods to modify it.
+	- MC_EVALUATE_STAT(EntityPlayer, EvaluateStatStage stat, float currentValue)
+		Optional param: EvaluateStatStage
+		Used to modify intermediate values of player stat calculations.
+		Currently supported: EvaluateStatStage.TEARS_UP, EvaluateStatStage.FLAT_TEARS, EvaluateStatStage.DAMAGE_UP, EvaluateStatStage.FLAT_DAMAGE
+		NOTE: Unless you need to perform complicated conditions/calculations, it is strongly suggested that you use the new XML item stats features instead of this callback!
+	- MC_EVALUATE_TEAR_HIT_PARAMS(EntityPlayer, TearParams, WeaponType, float DamageScale, integer TearDisplacement, Entity Source)
+		Optional param: PlayerType
+		Used to modify mutable TearParams object.
+	- MC_POST_ROOM_SAVE_STATE(Room, RoomDescriptor)
+		Fires after the room saves all entities and grid entities.
+	- MC_PRE_ROOM_RESTORE_STATE(Room, RoomDescriptor)
+		Fires before the room respawns all saved entities.
+	- MC_POST_SWAP_ROOMS(RoomDescriptor, RoomDescriptor)
+		Fires after two rooms have been swapped, due to Curse of the Maze.
+	- MC_POST_BACKWARDS_ROOM_SAVE(LevelStage, RoomDescriptor, string)
+		Fires after a room has been saved; to then be restored when generating the Ascent.
+		The string key (e.g. "boss_0", "treasure_0") identifies which slot the room was saved into.
+	- MC_POST_BACKWARDS_ROOM_RESTORE(LevelStage, RoomDescriptor, string)
+		Fires when generating the Ascent layout and one of the previously saved room is restored.
+		The string key (e.g. "boss_0", "treasure_0") identifies which slot the room was saved into.
+	- MC_PRE_ADD_TRINKET(player, TrinketType, firstTime)
+		Return false to cancel, or a different TrinketType to change the trinket being added.
 * New Enums:
 	- DoorMask
 	- WaterClipFlag
+	- PlayerHUDLayout
+	- RoomEventOutput
+	- CustomCacheTag
+	- EvaluateStatStage
 * Room:
 	- GetWallColor()
 * Isaac:
-	- GetDoorMaskForRoomShape: Returns a DoorMask representing all DoorSlots that are allowed for the given RoomShape.
-* Added content and resources support for stringtable.sta, allowing for custom translation strings and categories. This also allows adding custom fortunes.
+	- GetAllowedDoorsMaskForRoomShape: Returns a DoorMask representing all DoorSlots that are allowed for the given RoomShape.
+	- UnClearChallenge(challenge id): sets the target challenge id as not cleared. Not recommended with vanilla ones, it should still work tho!
+	- SpawnBoss(Type,Variant,SubType,Position,Velocity,Spawner,Seed = ?) Spawns an NPC forcing it to be a Boss, giving it a boss bar and boss-lile qualities.
+* Options:
+	- AimLockEnabled
+	- AscentVoiceOver
+	- BossHPOnBottom
+	- Brightness
+	- Contrast
+	- Exposure
+	- OnlineChatEnabled (read-only)
+	- OnlineChatFilterEnabled (read-only)
+	- OnlineColorSet (read-only)
+	- OnlineHUD (read-only)
+	- OnlineInputDelay (read-only)
+	- OnlinePlayerOpacity (read-only)
+	- OnlinePlayerVolume (read-only)
+	- PreventModUpdates (now read-only)
+	- StreamerMode (read-only)
+	- TouchMode
+	- WindowHeight
+	- WindowPosX
+	- WindowPosY
+	- WindowWidth
 * Added the following customtag for items.xml:
 	* "noexpansionpack" - Prevents the active item (with 1 or 2 max charges) from being picked by Expansion Pack trinket.
 * Added the following customcache for items.xml:
 	* "healthtype" - Re-evaluate the player's HealthType
+	* "tearscap" - Re-evaluate the player's maximum tears-per-second before flat modifiers and multipliers. Triggers a CACHE_FIREDELAY eval when changed.
+	* "statmultiplier" - Re-evaluate the multiplier on the player's stats gained from items (the same one used for Cracked Crown and Tainted Bethany). Triggers standard cache evals for the relevant stats when changed.
+* Stats can now be assigned to collectibles, trinkets and nulls in items.xml! These stat modifications will behave identically to those from most vanilla items that modify those stats.
+	- For example:
+		tears="0.7" will behave like Sad Onion
+		flattears="0.5" will behave like Pisces
+		damage="1" will behave like Pentagram
+		flatdamage="2" will behave like Curved Horn
+	- Supported: tears, flattears, tearsmult, damage, flatdamage, damagemult, shotspeed, speed, range, luck
+	- Prepend "effect" to assign the stat change to the corresponding TemporaryEffect instead (ie: effecttears="0.7") (this is particularly relevant for active items)
+	- The corresponding "cache" values are automatically added to the item, so you don't need to specify those as well.
+* Add new Vanilla Tweaks option "Disable exit prompt", which disables prompt pop-up when you try to exit the game from title menu.
 Fixes:
 * Fixed an issue with luamod autocomplete not displaying all the available options
 * Fixed an issue where modded items' crafting quality was set to 0 if not explicitly defined in the XML.
+* Fixed Isaac.SetIcon sometimes failing after being called too many times.
 * Players can no longer get stuck with buggy heart containers when changed to soul/bone heart health types (they get converted by default).
+* Fixed player:Revive reviving The Forgotten with a bugged half soul heart that cannot be removed.
+* Fixed a possible error when a lua error occurs during a custom callback that uses a table as its callback ID.
 * EntityPlayer:
 	- SetBagOfCraftingSlot / SetBagOfCraftingContent now automatically recalculate the crafting output & shift bag contents if empty spaces are added in the middle.
+	- Fixed SetFootprintColor crashing
 * ItemConfig_Costume:
 	- Fixed SkinColor attribute (now provides a valid int and can be modified)
 * Level:
@@ -84,28 +223,16 @@ Fixes:
 	- TryPlaceRoom(AtDoor) no longer automatically unlocks the door to the new room if placed adjacent to the player's current room.
 * RoomTransition:
 	- Fixed StartBossIntro crash on call if room index for room transition is invalid.
-/newline/
-Modified:
-* EntityFamiliar:
-	- GetPathFinder -> GetPathfinder
-* EntityPlayer:
-	- DropCollectible now returns the spawned pedestal if one was spawned, as intended 
-	- SwapForgottenForm returns boolean, depending if Forgotten/Soul form was switched or not.
-* Level:
-	- TryPlaceRoom(AtDoor) no longer plays the key unlock sound if a room is created that connects to the player's current room.
-* ImGui:
-	- Adding an element with the same id as an existing one will now replace the existing element instead of throwing an error.
-	- If an error is caused by a callback, imgui will now properly throw an error
 * ModCallbacks:
-	- MC_POST_PLAYER_TRIGGER_EFFECT_REMOVED(EntityPlayer Player, int Count)
-		Added Count argument (how many instances of this effect were removed)
-	- MC_PRE_MOD_UNLOAD(Mod, bool ShuttingDown)
-		Added boolean argument that identifies if it is running due to game shutdown
-		Now runs earlier during shutdown, so code is less likely to crash
-* reloadshaders command will now reload custom anm2 shaders
-* Vanilla daily run leaderboard will now mark the submitted run entry with a transparent color if the run was cheated.
-* Daily goal path icon will now be displayed on Mega Satan daily runs.
-Fixes:
+	- Fixed returning false on MC_PRE_PLAYER_ADD_CARD/PILL not preventing the card/pill being added as intended.
+	- Fixed the float DamageAmount attribute in MC(_POST)_GRID_HURT_DAMAGE
+	- Fixed MC_POST_ENTITY_TAKE_DMG sometimes providing 0 for players
+	- Fixed MC_PRE/POST_GRID_ENTITY_TELEPORTER_RENDER not running
+	- Fixed the position passed by MC_PRE/POST_PLAYERHUD_RENDER_HEARTS for co-op Esaus in REP+
+* XMLData:
+	- Fixed an issue where entry names starting with numbers were not properly resolved for parameters
+	- Fixed an isue with ModData not displaying the extra REPENTOGON attributes (enabled/fulldirectory/etc)
+	- Fixed an issue with indev or pirated mods with repeated ids not showing up in luamod or in XMLData
 * ImGui:
 	- Fixed RemoveElement not working on elements created with AddInputColor.
 	- Fixed Render callbacks of window elements being executed even if the window is not visible
@@ -117,14 +244,53 @@ Fixes:
 	- (EntityNPC.Pathfinder has been left unaffected for existing mod compatibility)
 * GridEntity
 	- Fixed HurtDamage crashing
-* EntityPlayer
-	- Fixed SetFootprintColor crashing
-* ModCallbacks
-	- Fixed the float DamageAmount attribute in MC(_POST)_GRID_HURT_DAMAGE
-	- Fixed MC_POST_ENTITY_TAKE_DMG sometimes providing 0 for players
-	- Fixed MC_PRE/POST_GRID_ENTITY_TELEPORTER_RENDER not running
+* Console
+	- Fixed a crash with RegisterMacro if no parameters were passed into it.
 * Misc:
 	- Modded characters locked behind achievements no longer appear in the local co-op wheel.
+Modified:
+* EntityFamiliar:
+	- GetPathFinder -> GetPathfinder
+	- bool, table TryAimAtMarkedTarget(Vector AimDirection = nil, Direction Direction = Direction.NO_DIRECTION, Vector TargetPos = nil)
+		Return true if player's mark from Marked or Eye of the Occult/Gello target exists, false otherwise.
+		Return a table containing the changed AimDirection, Direction, and TargetPos.
+		The legacy function signature has been kept and should now properly return the changed TargetPos.
+* EntityPlayer:
+	- DropCollectible now returns the spawned pedestal if one was spawned, as intended 
+	- SwapForgottenForm returns boolean, depending if Forgotten/Soul form was switched or not.
+	- GetSmeltedTrinkets now accepts an optional table parameter, a list of trinket IDs, to use as a filter for better performance
+* Level:
+	- TryPlaceRoom(AtDoor) no longer plays the key unlock sound if a room is created that connects to the player's current room.
+* ImGui:
+	- Adding an element with the same id as an existing one will now replace the existing element instead of throwing an error.
+	- If an error is caused by a callback, imgui will now properly throw an error
+* ModCallbacks:
+	- MC_POST_PLAYER_TRIGGER_EFFECT_REMOVED(EntityPlayer Player, int Count)
+		Added Count argument (how many instances of this effect were removed)
+	- MC_PRE_MOD_UNLOAD(Mod, bool ShuttingDown)
+		Added boolean argument that identifies if it is running due to game shutdown
+		Now runs earlier during shutdown, so code is less likely to crash
+	- MC_POST_CURSE_EVAL
+		Returning a value will now pass the modified curse mask along to the next callback instead of ending the callback early.
+	- MC_PRE_ADD_COLLECTIBLE
+		Returning a value to modify the collectible being added will now pass that ID along to other callbacks instead of stopping.
+* reloadshaders command will now reload custom anm2 shaders
+* Daily goal path icon will now be displayed on Mega Satan daily runs.
+/newline/
+/versionseparator/
+v1.0.12.e -
+Fixes:
+* Macs and old systems should now be compatible with REPENTOGON (we no longer use OGL 3)
+/newline/
+/versionseparator/
+v1.0.12.d -
+Fixes:
+* Fix unsupported versions not running the repentogon update (which could make them be stuck and be forced to manually update in the future)
+/newline/
+/versionseparator/
+v1.0.12.c -
+Fixes:
+* Fix loss of items in Mom's chase when playing coop or 2 player chaarcters like J&E
 /newline/
 /versionseparator/
 v1.0.12.b -
@@ -336,7 +502,6 @@ Additions:
 	- Every tag that exists on at least one item in items.xml will also be triggered by CacheFlag.CACHE_ALL
 	- REPENTOGON adds one custom cache tag (so far): "familiarmultiplier". Note that this one does not trigger MC_EVALUATE_CUSTOM_CACHE, instead triggering MC_EVALUATE_FAMILIAR_MULTIPLIER for each familiar.
 /newline/
-/versionseparator/
 Fixes:
 	- Fixed the game getting permanantly stuck trying to generate an ascent floor if a modded boss room has certain door layouts
 	- Fix a vanilla bug that caused Hush's laser attack to ignore a room's slowdown state and always chase the player at full speed

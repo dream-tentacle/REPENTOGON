@@ -7,12 +7,14 @@
 #include <string>
 
 #include "LuaCore.h"
+#include "IconsFontAwesome6_unicode.h"
 
 extern int handleWindowFlags(int flags);
 extern ImGuiKey AddChangeKeyButton(bool isController, bool& wasPressed);
 extern void AddWindowContextMenu(bool* pinned);
 extern void HelpMarker(const char* desc);
 extern bool WindowBeginEx(const char* name, bool* p_open, ImGuiWindowFlags flags);
+extern float GetAvailableMenuSpace();
 extern bool menuShown;
 
 enum class IMGUI_ELEMENT {
@@ -585,7 +587,7 @@ struct CustomImGui {
             return true;
         }
         return false;
-    } 
+    }
 
     bool SetWindowChildFlags(const char* elementId, ImGuiChildFlags newFlags) IM_FMTARGS(2)
     {
@@ -737,10 +739,14 @@ struct CustomImGui {
 
         lua::LuaCaller caller = lua::LuaCaller(L);
         element->PropagateCallbackData(&caller);
-        if (caller.call(1)) {
+        if (lua::LuaResults result = caller.call(1)) {
             // Lua encountered an error while executing the callback function
             // printing the error needs to happen in a seperate lua call, as to keep the lua-stack and imgui-stack protected and stable
-            const char* errorMsg = lua_tostring(L, lua_gettop(L));
+            int stack_top = lua_gettop(L);
+            const char* errorMsg = lua_tostring(L, stack_top);
+
+            assert(errorMsg);
+
             int callbackTypeID = static_cast<int>(callbackType);
             g_Game->GetConsole()->PrintError(
                 "ImGui encountered an error in the '" + std::string(IMGUI_CALLBACK_TO_STRING[callbackTypeID])
@@ -994,7 +1000,20 @@ struct CustomImGui {
 
     void DrawMenu()
     {
-        DrawMenuElements(menuElements);
+        std::list<Element> overflowElements {};
+        DrawMenuElements(menuElements, &overflowElements);
+
+        if (overflowElements.empty())
+        {
+          return;
+        }
+
+        // Sort menu elements that exceed the menu bar size into a "..." Menu entry
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + GetAvailableMenuSpace());
+        if (ImGui::BeginMenu(ICON_U8_FA_ELLIPSIS)) {
+          DrawMenuElements(&overflowElements, nullptr);
+          ImGui::EndMenu();
+        }
     }
 
     void DrawWindows(bool isImGuiActive)
@@ -1066,12 +1085,21 @@ struct CustomImGui {
         }
     }
 
-    void DrawMenuElements(std::list<Element>* elements)
+    void DrawMenuElements(std::list<Element>* elements, std::list<Element>* overflowElements)
     {
         for (auto element = elements->begin(); element != elements->end(); ++element) {
             const char* name = element->name.c_str();
-            RunPreRenderCallbacks(&(*element));
 
+            // check if new menu entry can be displayed in the main menu. if not, add to overflow list to handle later
+            if (overflowElements != nullptr && element->type == IMGUI_ELEMENT::Menu && element->parent == nullptr) {
+                const float menuWidth = ImGui::CalcTextSize(name).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                if (GetAvailableMenuSpace() - menuWidth <= 0) {
+                    overflowElements->push_back(*element);
+                    continue;
+                }
+            }
+            // Display Menu element
+            RunPreRenderCallbacks(&(*element));
             ImGui::PushID(element->GetHash());
             HandleElementSize(&(*element), true);
             HandleElementColors(element->GetElementData(), true);
@@ -1079,7 +1107,7 @@ struct CustomImGui {
             case IMGUI_ELEMENT::Menu:
                 if (ImGui::BeginMenu(name)) {
                     RunCallbacks(&(*element));
-                    DrawMenuElements(element->children);
+                    DrawMenuElements(element->children, nullptr);
                     ImGui::EndMenu();
                 }
                 break;

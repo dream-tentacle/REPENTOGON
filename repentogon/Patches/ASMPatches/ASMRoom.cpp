@@ -113,7 +113,7 @@ bool __stdcall MegaSatanCallbackTrampoline() {
 }
 
 void ASMPatchMegaSatanEnding() {
-	SigScan scanner("807d??0074??807d??0074??a1");
+	SigScan scanner("80bd????????000f84????????807d??000f84????????a1????????8d8d"); //CHECK-ME
 	scanner.Scan();
 	void* addr = scanner.GetAddress();
 
@@ -125,10 +125,10 @@ void ASMPatchMegaSatanEnding() {
 		.AddInternalCall(MegaSatanCallbackTrampoline)
 		.AddBytes("\x84\xC0")  // test al, al
 		.RestoreRegisters(reg)
-		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNZ, (char*)addr + 0xC)  // Callback returned true, suppress the ending.
-		.AddBytes(ByteBuffer().AddAny((char*)addr, 0x4))  // Callback did not return true. Restore a boolean check that was overidden.
-		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JZ, (char*)addr + 0x45)  // Overidden jump to potentially trigger the ending.
-		.AddRelativeJump((char*)addr + 0x6);  // Continue as normal.
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNZ, (char*)addr + 0x17)  // Callback returned true, suppress the ending.
+		.AddBytes(ByteBuffer().AddAny((char*)addr, 0x7))  // Callback did not return true. Restore a boolean check that was overidden.
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JZ, (char*)addr + 0x9F)  // Overidden jump to potentially trigger the ending.
+		.AddRelativeJump((char*)addr + 0xD);  // Continue as normal.
 	sASMPatcher.PatchAt(addr, &patch);
 }
 
@@ -219,13 +219,15 @@ void PatchRoomClearDelay() {
 	ASMPatchDeepGaperClearCheck(addrs[2]);
 }
 
-// this changes the function to check Game's time counter instead of frame counter, in parity with TrySpawnBossRushDoor
+// this changes the function to check Game->_timeCounter instead of Game->_frameCount in parity with TrySpawnBossRushDoor
 void ASMPatchTrySpawnBlueWombDoor() {
-	SigScan scanner("83f8087c??8b87");
+	SigScan scanner("8b87????????3b87????????7e");
 	scanner.Scan();
-	void* addr = (char*)scanner.GetAddress() + 7;
-	printf("[REPENTOGON] Patching Room::TrySpawnBlueWombDoor at %p\n", addr);
+	void* addr = (char*)scanner.GetAddress() + 2;
+	int* offset = (int*)addr;
+	int desired = *offset + 0x4; // _timeCounter is directly after _frameCount
+	ZHL::Log("[REPENTOGON] Patching Room::TrySpawnBlueWombDoor frame count at %p (current offset is %d, new offset is %d)\n", addr, *offset, desired);
 	ASMPatch patch;
-	patch.AddBytes("\x28"); // 025b24 - > 025b28
+	patch.AddBytes(ByteBuffer().AddAny((char*)&desired, 4));
 	sASMPatcher.FlatPatch(addr, &patch);
 }

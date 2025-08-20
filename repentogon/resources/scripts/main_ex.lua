@@ -822,7 +822,7 @@ local function logError(callbackID, modName, err)
 
 	history = table.concat(history, "\n"):reverse()
 
-	local cbName = callbackIDToName[callbackID] or callbackID
+	local cbName = callbackIDToName[callbackID] or tostring(callbackID)
 	local consoleLog = '"' .. cbName .. '" from "' .. modName .. '" failed: ' .. err
 
 	-- We add a \n to our comparison to account for the parsed history having one.
@@ -1277,6 +1277,13 @@ local function DefaultRunCallbackLogic(callbackID, param, ...)
 	end
 end
 
+-- For callbacks with no return values that don't want to allow mods to terminate them early.
+local function RunNoReturnCallback(callbackID, param, ...)
+	for callback in GetCallbackIterator(callbackID, param) do
+		RunCallbackInternal(callbackID, callback, ...)
+	end
+end
+
 -- Basic "additive" callback behaviour. Values returned from a callback replace the value of the FIRST arg for subsequent callbacks.
 -- Separate implementations are used depending on which arg is updated by the return value, because table.unpack tricks are slower.
 local function RunAdditiveFirstArgCallback(callbackID, param, value, ...)
@@ -1328,12 +1335,35 @@ local function RunPreAddCardPillCallback(callbackID, param, player, pillCard, ..
 	for callback in GetCallbackIterator(callbackID, param) do
 		local ret = RunCallbackInternal(callbackID, callback, player, pillCard, ...)
 		if type(ret) == "boolean" and ret == false then
-			return
+			return false
 		elseif type(ret) == "number" and ret > 0 then
 			pillCard = ret
 		end
 	end
 	return pillCard
+end
+
+local function IsValidMultiShotParams(params)
+	return params ~= nil and type(params) == "userdata" and GetMetatableType(params) == "MultiShotParams"
+end
+
+local function RunGetMultiShotParamsCallback(_, param, player, multiShotParams, ...)
+	-- Run legacy callback first (didn't pass a modifiable MultiShotParams along, incentivised recursing GetMultiShotParams
+	-- inside the callback, returning a MultiShotParams terminated the callback and made it hard for multiple mods to modify).
+	-- Replacing it was cleaner for backwards compatability's sake, and we can just run the legacy callbacks here with no extra C jumps.
+	local legacyResult = Isaac.RunCallbackWithParam(ModCallbacks.MC_POST_PLAYER_GET_MULTI_SHOT_PARAMS, param, player)
+	if IsValidMultiShotParams(legacyResult) then
+		multiShotParams = legacyResult
+	end
+	
+	for callback in GetCallbackIterator(ModCallbacks.MC_EVALUATE_MULTI_SHOT_PARAMS, param) do
+		local ret = RunCallbackInternal(ModCallbacks.MC_EVALUATE_MULTI_SHOT_PARAMS, callback, player, multiShotParams, ...)
+		if IsValidMultiShotParams(ret) then
+			multiShotParams = ret
+		end
+	end
+	
+	return multiShotParams
 end
 
 -- Custom behaviour for pre-render callbacks (terminate on false, adds returned vectors to the render offset).
@@ -1368,7 +1398,7 @@ function _RunEntityTakeDmgCallback(callbackID, param, entity, damage, damageFlag
 				if ret.Damage and type(ret.Damage) == "number" then
 					damage = ret.Damage
 				end
-				if ret.DamageFlags and type(ret.DamageFlags) == "number" and ret.DamageFlags == math.floor(ret.DamageFlags) then
+				if ret.DamageFlags and type(ret.DamageFlags) == "number" and math.tointeger(ret.DamageFlags) then
 					damageFlags = ret.DamageFlags
 				end
 				if ret.DamageCountdown and type(ret.DamageCountdown) == "number" then
@@ -1386,6 +1416,104 @@ function _RunEntityTakeDmgCallback(callbackID, param, entity, damage, damageFlag
 	end
 
 	return combinedRet
+end
+
+local function RunAccumulateReturnTableCallback(callbackID, param, ...)
+	local retTable
+
+	for callback in GetCallbackIterator(callbackID, param) do
+		local ret = RunCallbackInternal(callbackID, callback, ...)
+		if ret ~= nil then
+			if type(ret) == "boolean" then
+				return ret
+			elseif type(ret) == "table" then
+				if retTable then
+					for k, v in pairs(ret) do
+						retTable[k] = v
+					end
+				else
+					retTable = ret
+				end
+			end
+		end
+	end
+
+	return retTable
+end
+
+local function RunPreAddCollectibleCallback(callbackID, param, collectibleType, charge, firstTime, slot, vardata, ...)
+	local retType
+	local retTable
+
+	for callback in GetCallbackIterator(callbackID, param) do
+		local ret = RunCallbackInternal(callbackID, callback, collectibleType, charge, firstTime, slot, vardata, ...)
+		if ret ~= nil then
+			if type(ret) == "boolean" and ret == false then
+				return false
+			elseif type(ret) == "number" then
+				retType = ret
+				collectibleType = ret
+				if retTable then
+					retTable.Type = ret
+				end
+			elseif type(ret) == "table" then
+				-- Set / update overrides so that they are visible to later callbacks.
+				collectibleType = ret[1] or collectibleType
+				charge = ret[2] or charge
+				if ret[3] ~= nil then
+					firstTime = ret[3]
+				end
+				slot = ret[4] or slot
+				vardata = ret[5] or vardata
+				if retTable then
+					for k, v in pairs(ret) do
+						retTable[k] = v
+					end
+				else
+					retTable = ret
+					retTable[1] = retTable[1] or collectibleType
+				end
+			end
+		end
+	end
+
+	return retTable or retType
+end
+
+local function RunPreAddTrinketCallback(callbackID, param, player, trinketType, firstTime, ...)
+	local retType
+	local retTable
+
+	for callback in GetCallbackIterator(callbackID, param) do
+		local ret = RunCallbackInternal(callbackID, callback, player, trinketType, firstTime, ...)
+		if ret ~= nil then
+			if type(ret) == "boolean" and ret == false then
+				return false
+			elseif type(ret) == "number" then
+				retType = ret
+				trinketType = ret
+				if retTable then
+					retTable.Type = ret
+				end
+			elseif type(ret) == "table" then
+				-- Set / update overrides so that they are visible to later callbacks.
+				trinketType = ret[1] or trinketType
+				if ret[2] ~= nil then
+					firstTime = ret[2]
+				end
+				if retTable then
+					for k, v in pairs(ret) do
+						retTable[k] = v
+					end
+				else
+					retTable = ret
+					retTable[1] = retTable[1] or trinketType
+				end
+			end
+		end
+	end
+
+	return retTable or retType
 end
 
 -- Custom handling for MC_PRE_TRIGGER_PLAYER_DEATH and MC_TRIGGER_PLAYER_DEATH_POST_CHECK_REVIVES.
@@ -1489,6 +1617,9 @@ rawset(Isaac, "RunTriggerPlayerDeathCallback", _RunTriggerPlayerDeathCallback)
 -- If a callback is not specified here, "DefaultRunCallbackLogic" will be called.
 local CustomRunCallbackLogic = {
 	[ModCallbacks.MC_ENTITY_TAKE_DMG] = _RunEntityTakeDmgCallback,
+	[ModCallbacks.MC_EVALUATE_MULTI_SHOT_PARAMS] = RunGetMultiShotParamsCallback,
+	[ModCallbacks.MC_POST_CURSE_EVAL] = RunAdditiveFirstArgCallback,
+	[ModCallbacks.MC_POST_ENTITY_REMOVE] = RunNoReturnCallback,
 	[ModCallbacks.MC_POST_PICKUP_SELECTION] = _RunPostPickupSelection,
 	[ModCallbacks.MC_PRE_TRIGGER_PLAYER_DEATH] = _RunTriggerPlayerDeathCallback,
 	[ModCallbacks.MC_TRIGGER_PLAYER_DEATH_POST_CHECK_REVIVES] = _RunTriggerPlayerDeathCallback,
@@ -1506,6 +1637,12 @@ local CustomRunCallbackLogic = {
 	[ModCallbacks.MC_PLAYER_GET_ACTIVE_MIN_USABLE_CHARGE] = RunAdditiveThirdArgCallback,
 	[ModCallbacks.MC_PLAYER_GET_ACTIVE_MAX_CHARGE] = RunAdditiveFourthArgCallback,
 	[ModCallbacks.MC_PRE_STATUS_EFFECT_APPLY] = RunPreStatusEffectApplyCallback,
+	[ModCallbacks.MC_PLAYER_HEALTH_TYPE_CHANGE] = RunNoReturnCallback,
+	[ModCallbacks.MC_EVALUATE_STAT] = RunAdditiveThirdArgCallback,
+	[ModCallbacks.MC_EVALUATE_TEAR_HIT_PARAMS] = RunAdditiveSecondArgCallback,
+	[ModCallbacks.MC_PRE_PLAYERHUD_RENDER_ACTIVE_ITEM] = RunAccumulateReturnTableCallback,
+	[ModCallbacks.MC_PRE_ADD_COLLECTIBLE] = RunPreAddCollectibleCallback,
+	[ModCallbacks.MC_PRE_ADD_TRINKET] = RunPreAddTrinketCallback,
 }
 
 for _, callback in ipairs({
@@ -1701,6 +1838,7 @@ local LuaWrappersToRemove = {
 			"SetActiveCharge",
 			"DischargeActiveItem",
 			"SetPocketActiveItem",
+			"HasInvincibility",
 		}
 	},
 }

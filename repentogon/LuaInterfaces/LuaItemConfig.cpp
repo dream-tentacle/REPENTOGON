@@ -32,12 +32,25 @@ LUA_FUNCTION(Lua_ItemConfigItem_GetCustomTags) {
 	return 1;
 }
 
-LUA_FUNCTION(Lua_ItemConfigItem_HasCustomTag)
-{
+LUA_FUNCTION(Lua_ItemConfigItem_HasCustomTag) {
 	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
 	const std::string tag = luaL_checkstring(L, 2);
 	lua_pushboolean(L, GetItemXML(config)->HasCustomTag(config->id, tag));
 	return 1;
+}
+
+LUA_FUNCTION(Lua_ItemConfigItem_AddCustomTag) {
+	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
+	const std::string tag = luaL_checkstring(L, 2);
+	GetItemXML(config)->AddCustomTag(config->id, tag);
+	return 0;
+}
+
+LUA_FUNCTION(Lua_ItemConfigItem_RemoveCustomTag) {
+	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
+	const std::string tag = luaL_checkstring(L, 2);
+	GetItemXML(config)->RemoveCustomTag(config->id, tag);
+	return 0;
 }
 
 LUA_FUNCTION(Lua_ItemConfigItem_GetCustomCacheTags) {
@@ -58,20 +71,38 @@ LUA_FUNCTION(Lua_ItemConfigItem_GetCustomCacheTags) {
 	return 1;
 }
 
-LUA_FUNCTION(Lua_ItemConfigItem_HasCustomCacheTag)
-{
+LUA_FUNCTION(Lua_ItemConfigItem_HasCustomCacheTag) {
 	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
 	const std::string tag = luaL_checkstring(L, 2);
 	lua_pushboolean(L, GetItemXML(config)->HasCustomCache(config->id, tag));
 	return 1;
 }
 
+LUA_FUNCTION(Lua_ItemConfigItem_AddCustomCacheTag) {
+	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
+	const std::string tag = luaL_checkstring(L, 2);
+	GetItemXML(config)->AddCustomCache(config->id, tag);
+	XMLStuff.AddKnownCustomCache(tag);
+	return 0;
+}
+
+LUA_FUNCTION(Lua_ItemConfigItem_RemoveCustomCacheTag) {
+	ItemConfig_Item* config = lua::GetLuabridgeUserdata<ItemConfig_Item*>(L, 1, lua::Metatables::ITEM, "Item");
+	const std::string tag = luaL_checkstring(L, 2);
+	GetItemXML(config)->RemoveCustomCache(config->id, tag);
+	return 0;
+}
+
 void RegisterItemFunctions(lua_State* L) {
 	luaL_Reg functions[] = {
 		{ "GetCustomTags", Lua_ItemConfigItem_GetCustomTags },
 		{ "HasCustomTag", Lua_ItemConfigItem_HasCustomTag },
+		{ "AddCustomTag", Lua_ItemConfigItem_AddCustomTag },
+		{ "RemoveCustomTag", Lua_ItemConfigItem_RemoveCustomTag },
 		{ "GetCustomCacheTags", Lua_ItemConfigItem_GetCustomCacheTags },
 		{ "HasCustomCacheTag", Lua_ItemConfigItem_HasCustomCacheTag },
+		{ "AddCustomCacheTag", Lua_ItemConfigItem_AddCustomCacheTag },
+		{ "RemoveCustomCacheTag", Lua_ItemConfigItem_RemoveCustomCacheTag },
 		{ NULL, NULL }
 	};
 
@@ -149,16 +180,27 @@ LUA_FUNCTION(Lua_ItemConfigCard_GetHidden) {
 	return 1;
 }
 
-void RegisterCardFunctions(lua_State* L) {
-	luaL_Reg functions[] = {
-		{ "GetAvailabilityCondition", Lua_ItemConfigCard_GetAvailabilityCondition },
-		{ "SetAvailabilityCondition", Lua_ItemConfigCard_SetAvailabilityCondition },
-		{ "ClearAvailabilityCondition", Lua_ItemConfigCard_ClearAvailabilityCondition },
-		{ NULL, NULL }
-	};
+template <bool Const>
+static inline void RegisterCardFields(lua_State* L) {
+	constexpr auto mt = Const ? lua::Metatables::CONST_CARD : lua::Metatables::CARD;
 
-	lua::RegisterFunctions(L, lua::Metatables::CARD, functions);
-	lua::RegisterFunctions(L, lua::Metatables::CONST_CARD, functions);
+	lua::RegisterVariableGetter(L, mt, "ModdedCardFront", Lua_ItemConfigCard_ModdedCardFront_propget);
+	lua::RegisterVariableGetter(L, mt, "Hidden", Lua_ItemConfigCard_GetHidden);
+	lua::RegisterVariableGetter(L, mt, "InitialWeight", Lua_ItemConfigCard_GetInitialWeight);
+	lua::RegisterVariableGetter(L, mt, "Weight", Lua_ItemConfigCard_GetWeight);
+
+	if constexpr (!Const)
+	{
+		lua::RegisterVariableSetter(L, mt, "Weight", Lua_ItemConfigCard_SetWeight);
+	}
+
+	lua::RegisterFunction(L, mt, "GetAvailabilityCondition", Lua_ItemConfigCard_GetAvailabilityCondition);
+
+	if constexpr (!Const)
+	{
+		lua::RegisterFunction(L, mt, "SetAvailabilityCondition", Lua_ItemConfigCard_SetAvailabilityCondition);
+		lua::RegisterFunction(L, mt, "ClearAvailabilityCondition", Lua_ItemConfigCard_ClearAvailabilityCondition);
+	}
 }
 
 LUA_FUNCTION(Lua_ItemConfigPill_EffectSubClass_propget) {
@@ -167,9 +209,16 @@ LUA_FUNCTION(Lua_ItemConfigPill_EffectSubClass_propget) {
 	return 1;
 }
 
+// Legacy compat for a player function in ItemConfig
 LUA_FUNCTION(Lua_ItemConfig_CanRerollCollectible) {
 	int id = (int)luaL_checkinteger(L, 1);
-	lua_pushboolean(L, CanRerollCollectible(id));
+
+	if (!g_Game->_playerManager._playerList.empty() && g_Game->GetPlayer(0) && g_Game->GetPlayer(0)->_exists) {
+		lua_pushboolean(L, g_Game->GetPlayer(0)->CanRerollCollectible(id, false));
+	} else {
+		lua_pushboolean(L, !g_Manager->GetItemConfig()->IsQuestItem(id));
+	}
+
 	return 1;
 }
 
@@ -231,13 +280,8 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 		{ NULL, NULL }
 	};
 
-	lua::RegisterVariableGetter(_state, lua::Metatables::CARD, "ModdedCardFront",Lua_ItemConfigCard_ModdedCardFront_propget);
-	lua::RegisterVariableGetter(_state, lua::Metatables::CARD, "Hidden", Lua_ItemConfigCard_GetHidden);
-	lua::RegisterVariableGetter(_state, lua::Metatables::CARD, "InitialWeight", Lua_ItemConfigCard_GetInitialWeight);
-	lua::RegisterVariable(_state, lua::Metatables::CARD, "Weight", Lua_ItemConfigCard_GetWeight, Lua_ItemConfigCard_SetWeight);
-	lua::RegisterVariableGetter(_state, lua::Metatables::CONST_CARD, "Hidden", Lua_ItemConfigCard_GetHidden);
-	lua::RegisterVariableGetter(_state, lua::Metatables::CONST_CARD, "InitialWeight", Lua_ItemConfigCard_GetInitialWeight);
-	RegisterCardFunctions(_state);
+	RegisterCardFields<false>(_state);
+	RegisterCardFields<true>(_state);
 
 	FixItemConfigPillEffects(_state);
 	lua::RegisterFunctions(_state, lua::Metatables::CONFIG, functions);

@@ -1,6 +1,7 @@
 #include "HookSystem.h"
 #include "IsaacRepentance.h"
 #include "ASMPatcher.hpp"
+#include "ASMDefinition.h"
 #include "SigScan.h"
 #include "XMLData.h"
 
@@ -16,7 +17,7 @@ bool __stdcall PlayerTypeNoShake(int playerType) {
 		return noShake == "true" ? true : noShake == "false" ? false : false;
 	}
 
-	return playerType == 4 || playerType == 16 || playerType == 17 || playerType == 14 || playerType == 25 || playerType == 35 || playerType == 33;
+	return playerType == PLAYER_BLUEBABY || playerType == PLAYER_THEFORGOTTEN || playerType == PLAYER_THESOUL || playerType == PLAYER_KEEPER || playerType == PLAYER_BLUEBABY_B || playerType == PLAYER_THEFORGOTTEN_B || playerType == PLAYER_KEEPER_B;
 }
 
 void ASMPatchNightmareSceneNoShake() {
@@ -70,27 +71,31 @@ bool __stdcall PlayerItemNoMetronome(int itemID) {
 		return false;
 	}
 
-	return itemID != 488 && itemID != 475 && itemID != 422 && itemID != 326 && itemID != 482 && itemID != 636;
+	return itemID != COLLECTIBLE_METRONOME && itemID != COLLECTIBLE_PLAN_C && itemID != COLLECTIBLE_GLOWING_HOUR_GLASS && itemID != COLLECTIBLE_BREATH_OF_LIFE && itemID != COLLECTIBLE_CLICKER && itemID != COLLECTIBLE_R_KEY && itemID != COLLECTIBLE_URN_OF_SOULS;
 }
 
 void ASMPatchPlayerItemNoMetronome() {
 	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
 
-	SigScan signature("81ffe80100000f84????????");
-	signature.Scan();
+	SigScan patchSignature("81ffe80100000f84????????");
+	patchSignature.Scan();
 
-	void* addr = signature.GetAddress();
-	printf("[REPENTOGON] Patching Player::UseActiveItem for nometronome tag at %p\n", addr);
+	void* patchAddr = patchSignature.GetAddress();
+	printf("[REPENTOGON] Patching Player::UseActiveItem for nometronome tag at %p\n", patchAddr);
+
+	SigScan exitSignature("8bbd????????85ff0f8f");
+	exitSignature.Scan();
+	void* exitAddr = exitSignature.GetAddress();
 
 	patch.PreserveRegisters(savedRegisters)
 		.Push(ASMPatch::Registers::EDI) // playerType
 		.AddInternalCall(PlayerItemNoMetronome)
 		.AddBytes("\x84\xC0") // test al, al
 		.RestoreRegisters(savedRegisters)
-		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)addr + 0x42) // jump for true
-		.AddRelativeJump((char*)addr + 0x11E);
-	sASMPatcher.PatchAt(addr, &patch);
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)patchAddr + 0x42) // jump for true
+		.AddRelativeJump(exitAddr);
+	sASMPatcher.PatchAt(patchAddr, &patch);
 }
 
 bool __stdcall PlayerItemNoExpansionPack(int itemID) {
@@ -98,27 +103,28 @@ bool __stdcall PlayerItemNoExpansionPack(int itemID) {
 		return false;
 	}
 
-	return itemID != 489 && itemID != 488 && itemID != 422 && itemID != 703;
+	return itemID != COLLECTIBLE_D_INFINITY && itemID != COLLECTIBLE_METRONOME && itemID != COLLECTIBLE_GLOWING_HOUR_GLASS && itemID != COLLECTIBLE_ESAU_JR;
 }
 
 void ASMPatchPlayerItemNoExpansionPack() {
 	ASMPatch::SavedRegisters savedRegisters(ASMPatch::SavedRegisters::Registers::GP_REGISTERS_STACKLESS, true);
 	ASMPatch patch;
 
-	SigScan signature("81f9e9010000");
-	signature.Scan();
+	void* patchAddr = sASMDefinitionHolder->GetDefinition(&AsmDefinitions::PlayerItemNoMetronome);
+	printf("[REPENTOGON] Patching Player::TriggerActiveItemUsed for noexpansionpack tag at %p\n", patchAddr);
 
-	void* addr = signature.GetAddress();
-	printf("[REPENTOGON] Patching Player::TriggerActiveItemUsed for noexpansionpack tag at %p\n", addr);
+	SigScan exitSignature("8b45??ff45??8b55??8b88????????8b80????????2bc1c1f8023bd00f82????????8b8b????????81c1500b0000");
+	exitSignature.Scan();
+	void* exitAddr = exitSignature.GetAddress();
 
 	patch.PreserveRegisters(savedRegisters)
 		.Push(ASMPatch::Registers::ECX) // itemId
 		.AddInternalCall(PlayerItemNoExpansionPack)
 		.AddBytes("\x84\xC0") // test al, al
 		.RestoreRegisters(savedRegisters)
-		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)addr + 0x20) // jump for true
-		.AddRelativeJump((char*)addr + 0x7b);
-	sASMPatcher.PatchAt(addr, &patch);
+		.AddConditionalRelativeJump(ASMPatcher::CondJumps::JNE, (char*)patchAddr + 0x20) // jump for true
+		.AddRelativeJump(exitAddr);
+	sASMPatcher.PatchAt(patchAddr, &patch);
 }
 
 void ASMPatchesForPlayerCustomTags() {

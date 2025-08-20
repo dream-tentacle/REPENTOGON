@@ -19,7 +19,7 @@ namespace LagMetric{
 	};
 	inline bool LagMetric::is_tris_laser(Entity_Laser* in) {
 		const unsigned int tris_flag = (1 << (60 - 32));
-		if(in->_parent && in->_parent->_type == 2 && ((((Entity_Tear*)(in->_parent))->_tearFlags.lh & tris_flag) == tris_flag)){
+		if(in->GetParent() && in->GetParent()->_type == 2 && ((((Entity_Tear*)(in->GetParent()))->_tearFlags.lh & tris_flag) == tris_flag)) {
 			return true;
 		};
 		return false;
@@ -100,11 +100,15 @@ HOOK_METHOD(Entity_Laser, ClearLaserSamples, ()->void) {
 	//};
 	return super();
 };
+
+//disabled due to visual breaks with eye of the occult, marked
+/*
 HOOK_METHOD(Entity_Laser, Update, (void)->void) {
 	if(is_tris_laser(this)){
 		ApplyTris(this);
 		return super();
 	};
+
 	if (!this->_sampleLaser || (this->_homingLaser._sampleNum < 10) || (this->_variant==2 && !*(this->GetOneHit()) && !is_circle_laser(this)) ) {
 		return super();
 	};
@@ -114,3 +118,4 @@ HOOK_METHOD(Entity_Laser, Update, (void)->void) {
 	//};
 	return super();
 };
+*/

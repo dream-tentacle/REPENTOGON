@@ -1,0 +1,32 @@
+"c700(????????)c740??00000000c740??00000000c740??0000000066c740??00008946":
+reference void* SteamCloudFile_vftable;
+
+"558bec5368":
+__thiscall bool SteamCloudFile::PushToSteamCloud(const char* path, uint32_t size);
+
+
+struct SteamCloudFile : public KAGE_Filesys_FileStream {
+	{{
+        SteamCloudFile()
+        {
+            this->_vtable = __ptr_SteamCloudFile_vftable;
+            this->_status = 2;
+            this->_filePath = nullptr;
+            this->_steamCloudFilename = nullptr;
+            this->_buffer = nullptr;
+            this->_bufferSize = 0;
+            this->_position = 0;
+            this->_size = 0;
+            this->_unk = false;
+            this->_isEof = false;
+        }
+    }}
+
+	const char* _steamCloudFilename : 0xc;
+	char* _buffer : 0x10;
+	uint32_t _bufferSize : 0x14;  // Total size of the currently allocated buffer.
+	uint32_t _position : 0x18;
+	uint32_t _size : 0x1c;  // How many bytes have been written into the buffer so far.
+	bool _unk : 0x20;
+	bool _isEof : 0x21;
+} : 0x24;

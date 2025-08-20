@@ -181,7 +181,7 @@ LUA_FUNCTION(Lua_ChallengeParamCanShoot)
 LUA_FUNCTION(Lua_ChallengeParamIsAltPath)
 {
 	ChallengeParam* challengeParam = *lua::GetRawUserdata<ChallengeParam**>(L, 1, lua::metatables::ChallengeParamMT);
-	lua_pushboolean(L, challengeParam->_isAltPath);
+	lua_pushboolean(L, challengeParam->_pathType == 1); //formerly challengeParam->_isAltPath
 
 	return 1;
 }
@@ -253,7 +253,7 @@ LUA_FUNCTION(Lua_ChallengeParamGetCurseFilter)
 LUA_FUNCTION(Lua_ChallengeParamIsSecretPath)
 {
 	ChallengeParam* challengeParam = *lua::GetRawUserdata<ChallengeParam**>(L, 1, lua::metatables::ChallengeParamMT);
-	lua_pushboolean(L, challengeParam->_isSecretPath);
+	lua_pushboolean(L, challengeParam->_pathType == 2); //formerly challengeParam->_isSecretPath
 
 	return 1;
 }
@@ -273,6 +273,14 @@ LUA_FUNCTION(Lua_ChallengeParamGetCollectibleTwinList)
 	}
 
 	//lua_pushstring(L, challengeParam->_name.c_str());
+	return 1;
+}
+
+LUA_FUNCTION(Lua_ChallengeParamIsBeastPath)
+{
+	ChallengeParam* challengeParam = *lua::GetRawUserdata<ChallengeParam**>(L, 1, lua::metatables::ChallengeParamMT);
+	lua_pushboolean(L, challengeParam->_pathType == 3); //formerly challengeParam->_isSecretPath
+
 	return 1;
 }
 
@@ -307,6 +315,7 @@ static void RegisterChallengeParam(lua_State* L) {
 		{ "GetCurseFilter", Lua_ChallengeParamGetCurseFilter },
 		{ "IsSecretPath", Lua_ChallengeParamIsSecretPath },
 		{ "GetCollectibleTwinList", Lua_ChallengeParamGetCollectibleTwinList },
+		{ "IsBeastPath", Lua_ChallengeParamIsBeastPath },
 		{ NULL, NULL }
 	};
 	lua::RegisterNewClass(L, lua::metatables::ChallengeParamMT, lua::metatables::ChallengeParamMT, functions);

@@ -9,6 +9,7 @@
 #include "../../Patches/ItemPoolManager.h"
 #include "../../Patches/ExtraLives.h"
 #include "../../Patches/EntityPlus.h"
+#include "../../Patches/PlayerFeatures.h"
 #include "../../Patches/XmlData.h"
 
 #include <algorithm>
@@ -1056,7 +1057,7 @@ LUA_FUNCTION(Lua_PlayerTriggerRoomClear) {
 
 LUA_FUNCTION(Lua_PlayerShuffleCostumes) {
 	Entity_Player* plr = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
-	unsigned int seed = (unsigned int)luaL_optinteger(L, 2, std::min(Isaac::genrand_int32(), 1U));
+	unsigned int seed = (unsigned int)luaL_optinteger(L, 2, std::max(Isaac::genrand_int32(), 1U));
 	plr->ShuffleCostumes(seed);
 
 	return 0;
@@ -1458,6 +1459,20 @@ LUA_FUNCTION(Lua_PlayerSetBabySkin) {
 	return 0;
 }
 
+LUA_FUNCTION(Lua_PlayerGetRevelationCharge) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	lua_pushinteger(L, player->_revelationChargeTimer);
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerSetRevelationCharge) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	player->_revelationChargeTimer = (int)luaL_checkinteger(L, 2);
+
+	return 0;
+}
+
 LUA_FUNCTION(Lua_PlayerGetMaggySwingCooldown) {
 	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
 	lua_pushinteger(L, player->_maggySwingCooldown);
@@ -1496,31 +1511,73 @@ LUA_FUNCTION(Lua_PlayerAddSmeltedTrinket) {
 	const int trinketID = (int)luaL_checkinteger(L, 2);
 	const bool firstTime = lua::luaL_optboolean(L, 3, true);
 
-	lua_pushboolean(L, player->AddSmeltedTrinket(trinketID, firstTime));
+	lua_pushboolean(L, AddSmeltedTrinketToPlayer(player, trinketID, firstTime));
 	return 1;
+}
+
+LUALIB_API void PushSmeltedTrinketDesc(lua_State* L, const SmeltedTrinketDesc& desc) {
+	lua_newtable(L);
+
+	lua_pushstring(L, "trinketAmount");
+	lua_pushinteger(L, desc._trinketNum);
+	lua_settable(L, -3);
+
+	lua_pushstring(L, "goldenTrinketAmount");
+	lua_pushinteger(L, desc._goldenTrinketNum);
+	lua_settable(L, -3);
 }
 
 LUA_FUNCTION(Lua_PlayerGetSmeltedTrinkets) {
 	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
 	std::vector<SmeltedTrinketDesc>& smeltedTrinkets = player->_smeltedTrinkets;
 
-	lua_newtable(L);
-	for (size_t i = 1; i < smeltedTrinkets.size(); i++) {
-		lua_pushinteger(L, i); 
+	if (lua_type(L, 2) == LUA_TTABLE) {
+		// Return info for only the trinket IDs present in the provided table.
+		std::set<int> ids;
+
+		auto tableLength = lua_rawlen(L, 2);
+		for (auto i = 1; i <= tableLength; ++i) {
+			lua_pushinteger(L, i);
+			lua_gettable(L, 2);
+			if (lua_type(L, -1) == LUA_TNIL)
+				break;
+			const int trinketID = (int)luaL_checkinteger(L, -1) & TRINKET_ID_MASK;
+			if (g_Manager->GetItemConfig()->IsValidTrinket(trinketID)) {
+				ids.insert(trinketID);
+			}
+			lua_pop(L, 1);
+		}
 
 		lua_newtable(L);
-
-		lua_pushstring(L, "trinketAmount");
-		lua_pushinteger(L, smeltedTrinkets[i]._trinketNum);
-		lua_settable(L, -3);
-
-		lua_pushstring(L, "goldenTrinketAmount");
-		lua_pushinteger(L, smeltedTrinkets[i]._goldenTrinketNum);
-		lua_settable(L, -3);
-
-		lua_settable(L, -3);
+		int i = 1;
+		for (const int trinketID : ids) {
+			lua_pushinteger(L, trinketID);
+			PushSmeltedTrinketDesc(L, smeltedTrinkets[trinketID]);
+			lua_settable(L, -3);
+		}
+	} else {
+		// Return info for ALL trinkets.
+		lua_newtable(L);
+		for (size_t i = 1; i < smeltedTrinkets.size(); i++) {
+			lua_pushinteger(L, i);
+			PushSmeltedTrinketDesc(L, smeltedTrinkets[i]);
+			lua_settable(L, -3);
+		}
 	}
 
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSmeltedTrinketDesc) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	const int trinketID = (int)luaL_checkinteger(L, 2) & TRINKET_ID_MASK;
+
+	if (!g_Manager->GetItemConfig()->IsValidTrinket(trinketID)) {
+		lua_pushnil(L);
+		return 1;
+	}
+
+	PushSmeltedTrinketDesc(L, player->_smeltedTrinkets[trinketID]);
 	return 1;
 }
 
@@ -2120,28 +2177,42 @@ int ValidatePool(lua_State* L, unsigned int pos)
 	return ret;
 }
 
+static void salvage_collectible_entity(Entity_Player& player, Entity_Pickup& pickup, int pool, RNG* rng) noexcept
+{
+	rng = rng ? rng : &pickup._dropRNG;
+	player.SalvageCollectible(pickup.GetPosition(), pickup._subtype, rng->Next(), pool);
+
+	pickup.TryRemoveCollectible();
+	g_Game->Spawn(ENTITY_EFFECT, 15, *pickup.GetPosition() + Vector(0, 10), Vector(0, 0), nullptr, 0, Random(), 0);
+	pickup._timeout = 2;
+}
+
+static void salvage_collectible(Entity_Player& player, int subType, int pool, Vector* position, RNG* rng) noexcept
+{
+	position = position ? position : player.GetPosition();
+	rng = rng ? rng : &player._dropRNG;
+
+	player.SalvageCollectible(position, subType, rng->Next(), pool);
+}
+
 LUA_FUNCTION(Lua_PlayerSalvageCollectible) {
 	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
 	Vector* pos = nullptr;
 	RNG* rng = nullptr;
-	unsigned int subtype, seed;
+	unsigned int subtype;
 	int pool = -1;
 
 	// pickup override
 	if (lua_type(L, 2) == LUA_TUSERDATA) {
 		Entity_Pickup* pickup = lua::GetLuabridgeUserdata<Entity_Pickup*>(L, 2, lua::Metatables::ENTITY_PICKUP, "EntityPickup");
-		subtype = pickup->_subtype;
-		pos = pickup->GetPosition();
+
 		if (lua_type(L, 3) == LUA_TUSERDATA) {
 			rng = lua::GetLuabridgeUserdata<RNG*>(L, 3, lua::Metatables::RNG, "RNG");
 		}
-		else
-		{
-			rng = &pickup->_dropRNG;
-		}
+
 		pool = ValidatePool(L, 4);
 
-		pickup->Remove();
+		salvage_collectible_entity(*player, *pickup, pool, rng);
 	}
 	// CollectibleType override
 	else {
@@ -2149,22 +2220,15 @@ LUA_FUNCTION(Lua_PlayerSalvageCollectible) {
 		if (lua_type(L, 3) == LUA_TUSERDATA) {
 			pos = lua::GetLuabridgeUserdata<Vector*>(L, 3, lua::Metatables::VECTOR, "Vector");
 		}
-		else
-		{
-			pos = player->GetPosition();
-		}
+
 		if (lua_type(L, 4) == LUA_TUSERDATA) {
 			rng = lua::GetLuabridgeUserdata<RNG*>(L, 4, lua::Metatables::RNG, "RNG");
 		}
-		else
-		{
-			rng = &player->_dropRNG;
-		}
-		pool = ValidatePool(L, 5);
-	}
-	seed = rng->Next();
 
-	player->SalvageCollectible(pos, subtype, seed, pool);
+		pool = ValidatePool(L, 5);
+
+		salvage_collectible(*player, subtype, pool, pos, rng);
+	}
 	return 0;
 }
 
@@ -2194,7 +2258,6 @@ LUA_FUNCTION(Lua_PlayerGetFootprintColor) {
 LUA_FUNCTION(Lua_PlayerSetFootprintColor) {
 	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
 	KColor* color = lua::GetLuabridgeUserdata<KColor*>(L, 2, lua::Metatables::KCOLOR, "KColor");
-	g_Game->GetConsole()->Print(std::to_string(color->_red) + "\n", 0xFFFFFFFF, 60);
 	// Allegedly this boolean is "rightfoot" but I'm not so sure that's true based on the decomp of SetFootprintColor. Seems more like a "force"-type deal.
 	bool unk = lua::luaL_optboolean(L, 3, false);
 	player->SetFootprintColor(*color, unk);
@@ -2553,18 +2616,20 @@ LUA_FUNCTION(Lua_PlayerAddCustomCacheTag) {
 
 LUA_FUNCTION(Lua_PlayerGetCustomCacheValue) {
 	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
-
 	const std::string tag = luaL_checkstring(L, 2);
+	lua_pushnumber(L, GetCustomCacheValue(player, tag));
+	return 1;
+}
 
-	EntityPlayerPlus* playerPlus = GetEntityPlayerPlus(player);
+LUA_FUNCTION(Lua_PlayerGetTearsCap) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	lua_pushnumber(L, GetCustomCacheValue(player, "tearscap"));
+	return 1;
+}
 
-	if (playerPlus && playerPlus->customCacheResults.find(tag) != playerPlus->customCacheResults.end()) {
-		lua_pushnumber(L, playerPlus->customCacheResults[tag]);
-	}
-	else {
-		lua_pushnumber(L, 0);
-	}
-
+LUA_FUNCTION(Lua_PlayerGetStatMultiplier) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	lua_pushnumber(L, GetCustomCacheValue(player, "statmultiplier"));
 	return 1;
 }
 
@@ -2701,6 +2766,201 @@ LUA_FUNCTION(Lua_PlayerSetRockBottomLuck) {
 	return 0;
 }
 
+static const int candyHeartSoulLocketStats[6] = { CACHE_DAMAGE, CACHE_FIREDELAY, CACHE_RANGE, CACHE_SHOTSPEED, CACHE_SPEED, CACHE_LUCK };
+static const std::string candyHeartSoulLocketStatNames[6] = { "Damage", "FireDelay", "TearRange", "ShotSpeed", "MoveSpeed", "Luck"};
+
+static void AddCandyHeartSoulLocketBonus(Entity_Player* plr, const bool isSoulLocket, int cacheFlags, const int amount) {
+	cacheFlags = cacheFlags & CACHE_ALL;
+	if (cacheFlags <= 0) {
+		cacheFlags = candyHeartSoulLocketStats[plr->GetCollectibleRNG(isSoulLocket ? COLLECTIBLE_SOUL_LOCKET : COLLECTIBLE_CANDY_HEART)->RandomInt(6)];
+	}
+
+	bool evaluateItems = false;
+
+	for (int i = 0; i < 6; i++) {
+		if (cacheFlags & candyHeartSoulLocketStats[i]) {
+			if (isSoulLocket) {
+				plr->_soulLocketStatUps[i] = (uint16_t)std::clamp(plr->_soulLocketStatUps[i] + amount, 0, 0xFFFF);
+			} else {
+				plr->_candyHeartStatUps[i] = (uint16_t)std::clamp(plr->_candyHeartStatUps[i] + amount, 0, 0xFFFF);
+			}
+			evaluateItems = true;
+		}
+	}
+
+	if (evaluateItems) {
+		plr->AddCacheFlags(cacheFlags);
+		plr->EvaluateItems();
+	}
+}
+
+LUA_FUNCTION(Lua_PlayerGetCandyHeartBonus) {
+	Entity_Player* plr = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua_newtable(L);
+	for (int i = 0; i < 6; i++) {
+		lua_pushstring(L, candyHeartSoulLocketStatNames[i].c_str());
+		lua_pushinteger(L, plr->_candyHeartStatUps[i]);
+		lua_settable(L, -3);
+	}
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerAddCandyHeartBonus) {
+	Entity_Player* plr = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	int cacheFlags = (int)luaL_optinteger(L, 2, 0);
+	int amount = (int)luaL_optinteger(L, 3, 1);
+
+	if (amount != 0) {
+		AddCandyHeartSoulLocketBonus(plr, false, cacheFlags, amount);
+	}
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSoulLocketBonus) {
+	Entity_Player* plr = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua_newtable(L);
+	for (int i = 0; i < 6; i++) {
+		lua_pushstring(L, candyHeartSoulLocketStatNames[i].c_str());
+		lua_pushinteger(L, plr->_soulLocketStatUps[i]);
+		lua_settable(L, -3);
+	}
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerAddSoulLocketBonus) {
+	Entity_Player* plr = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+	int cacheFlags = (int)luaL_optinteger(L, 2, 0);
+	int amount = (int)luaL_optinteger(L, 3, 1);
+
+	if (amount != 0) {
+		AddCandyHeartSoulLocketBonus(plr, true, cacheFlags, amount);
+	}
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerGetPlayerHUD) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	PlayerHUD* playerhud = player->_playerHUD;  // Strawman etc have this
+
+	if (!playerhud) {
+		for (int i = 0; i < 8; i++) {
+			PlayerHUD* phudi = g_Game->GetHUD()->GetPlayerHUD(i);
+			if (phudi && phudi->GetPlayer() == player) {
+				playerhud = phudi;
+				break;
+			}
+		}
+	}
+	
+	if (playerhud) {
+		PlayerHUD** ud = (PlayerHUD**)lua_newuserdata(L, sizeof(PlayerHUD*));
+		*ud = playerhud;
+		luaL_setmetatable(L, lua::metatables::PlayerHUDMT);
+	} else {
+		lua_pushnil(L);
+	}
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSuplexState) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua_pushinteger(L, player->_suplexState);
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerSetSuplexState) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	player->_suplexState = (int)luaL_checkinteger(L, 2);
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSuplexAimCountdown) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua_pushinteger(L, player->_suplexAimCountdown);
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerSetSuplexAimCountdown) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	player->_suplexAimCountdown = (int)luaL_checkinteger(L, 2);
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSuplexTargetPosition) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua::luabridge::UserdataValue<Vector>::push(L, lua::GetMetatableKey(lua::Metatables::VECTOR), player ->_suplexTargetPos);
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerSetSuplexTargetPosition) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	player->_suplexTargetPos = *lua::GetLuabridgeUserdata<Vector*>(L, 2, lua::Metatables::VECTOR, "Vector");
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerGetSuplexLandPosition) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	lua::luabridge::UserdataValue<Vector>::push(L, lua::GetMetatableKey(lua::Metatables::VECTOR), player->_suplexLandPos);
+
+	return 1;
+}
+
+LUA_FUNCTION(Lua_PlayerSetSuplexLandPosition) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	player->_suplexLandPos = *lua::GetLuabridgeUserdata<Vector*>(L, 2, lua::Metatables::VECTOR, "Vector");
+
+	return 0;
+}
+
+LUA_FUNCTION(Lua_PlayerCreateAfterimage) {
+	auto* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	const int duration = (int)luaL_checkinteger(L, 2);
+	const Vector pos = *lua::GetLuabridgeUserdata<Vector*>(L, 3, lua::Metatables::VECTOR, "Vector");
+
+	player->_afterImageFrames.push_back({ duration, pos });
+
+	return 0;
+}
+
+//Repentance+ bug fix: https://github.com/epfly6/RepentanceAPIIssueTracker/issues/598
+LUA_FUNCTION(Lua_PlayerHasInvincibility) {
+	Entity_Player* player = lua::GetLuabridgeUserdata<Entity_Player*>(L, 1, lua::Metatables::ENTITY_PLAYER, "EntityPlayer");
+
+	const uint64_t flag = (uint64_t)luaL_optinteger(L, 2, 0);
+
+	EntityRef* ref = nullptr;
+
+	if (lua_type(L, 3) == LUA_TUSERDATA) {
+		ref = lua::GetLuabridgeUserdata<EntityRef*>(L, 3, lua::Metatables::ENTITY_REF, "EntityRef");
+	}
+
+	lua_pushboolean(L, player->HasInvincibility(flag, ref));
+
+	return 1;
+}
 
 HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 	super();
@@ -2829,12 +3089,15 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 		{ "GetFlippedForm", Lua_PlayerGetBackupPlayer },
 		{ "SwapForgottenForm", Lua_SwapForgottenForm },
 		{ "SpawnAquariusCreep", Lua_SpawnAquariusCreep },
+		{ "GetRevelationCharge", Lua_PlayerGetRevelationCharge },
+		{ "SetRevelationCharge", Lua_PlayerSetRevelationCharge },
 		{ "GetMaggySwingCooldown", Lua_PlayerGetMaggySwingCooldown },
 		{ "SetMaggySwingCooldown", Lua_PlayerSetMaggySwingCooldown },
 		{ "PlayDelayedSFX", Lua_PlayerPlayDelayedSFX },
 		{ "CanUsePill", Lua_PlayerCanUsePill },
 		{ "AddSmeltedTrinket", Lua_PlayerAddSmeltedTrinket },
 		{ "GetSmeltedTrinkets", Lua_PlayerGetSmeltedTrinkets },
+		{ "GetSmeltedTrinketDesc", Lua_PlayerGetSmeltedTrinketDesc },
 		{ "GetCostumeLayerMap", Lua_PlayerGetCostumeLayerMap },
 		{ "IsItemCostumeVisible", Lua_PlayerIsItemCostumeVisible },
 		{ "IsCollectibleCostumeVisible", Lua_PlayerIsCollectibleCostumeVisible },
@@ -2928,6 +3191,8 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 		{ "GetBombVariant", Lua_PlayerGetBombVariant },
 		{ "AddCustomCacheTag", Lua_PlayerAddCustomCacheTag },
 		{ "GetCustomCacheValue", Lua_PlayerGetCustomCacheValue },
+		{ "GetTearsCap", Lua_PlayerGetTearsCap },
+		{ "GetStatMultiplier", Lua_PlayerGetStatMultiplier },
 		{ "GetMaxCoins", Lua_PlayerGetMaxCoins },
 		{ "GetMaxKeys", Lua_PlayerGetMaxKeys },
 		{ "GetMaxBombs", Lua_PlayerGetMaxBombs },
@@ -2948,6 +3213,21 @@ HOOK_METHOD(LuaEngine, RegisterClasses, () -> void) {
 		{ "SetRockBottomShotSpeed", Lua_PlayerSetRockBottomShotSpeed },
 		{ "GetRockBottomLuck", Lua_PlayerGetRockBottomLuck },
 		{ "SetRockBottomLuck", Lua_PlayerSetRockBottomLuck },
+		{ "GetCandyHeartBonus", Lua_PlayerGetCandyHeartBonus },
+		{ "AddCandyHeartBonus", Lua_PlayerAddCandyHeartBonus },
+		{ "GetSoulLocketBonus", Lua_PlayerGetSoulLocketBonus },
+		{ "AddSoulLocketBonus", Lua_PlayerAddSoulLocketBonus },
+		{ "GetPlayerHUD", Lua_PlayerGetPlayerHUD },
+		{ "GetSuplexState", Lua_PlayerGetSuplexState },
+		{ "SetSuplexState", Lua_PlayerSetSuplexState },
+		{ "GetSuplexAimCountdown", Lua_PlayerGetSuplexAimCountdown },
+		{ "SetSuplexAimCountdown", Lua_PlayerSetSuplexAimCountdown },
+		{ "GetSuplexTargetPosition", Lua_PlayerGetSuplexTargetPosition },
+		{ "SetSuplexTargetPosition", Lua_PlayerSetSuplexTargetPosition },
+		{ "GetSuplexLandPosition", Lua_PlayerGetSuplexLandPosition },
+		{ "SetSuplexLandPosition", Lua_PlayerSetSuplexLandPosition },
+		{ "CreateAfterimage", Lua_PlayerCreateAfterimage },
+		{ "HasInvincibility", Lua_PlayerHasInvincibility },
 
 		{ NULL, NULL }
 	};

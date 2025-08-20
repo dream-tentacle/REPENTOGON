@@ -42,9 +42,6 @@ static __cdecl void Isaac::Shutdown();
 "558BEC83EC08807D0800F30F1002F30F5C05????????F30F10":
 static __x86_64_output Vector Isaac::GetRenderPosition(Vector* source, bool scale);
 
-"558bec83ec30a1????????53":
-static __stdcall void Isaac::ClearBossHazards(bool includeNPCs);
-
 "558bec83e4f883ec24f30f1005":
 static __fastcall void Isaac::GetRandomPickupVelocity(Vector * buffer, Vector * position, unsigned int ePickupVelType, RNG * rng);
 
@@ -54,6 +51,19 @@ static __x86_64_output Vector Isaac::GetCollectibleSpawnPosition(Vector* target)
 
 "538bda578bf9":
 static __x86_64_output Vector Isaac::GetAxisAlignedUnitVectorFromDir(int eDir);
+
+"558bec83e4f883ec105657ba":
+static void Isaac::RebuildContentMountPoints();
+
+"558bec0f1002":
+static cleanup void Isaac::SwapANM2(ANM2* left<ecx>, ANM2* right<edx>);
+
+/*"558bec8b45??83380175??803d????????00":
+// static cleanup void Isaac::ConfirmGameExit(int* result);
+*/
+
+"803d????????00a1????????75??6a006801000100e8????????83c408c3":
+static void Isaac::ConfirmGameExit(); //better
 
 struct Isaac {
     {{
